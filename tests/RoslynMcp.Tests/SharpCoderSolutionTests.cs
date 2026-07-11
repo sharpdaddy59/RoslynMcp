@@ -1,0 +1,181 @@
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Build.Locator;
+using RoslynMcp.Tools;
+using Xunit;
+
+namespace RoslynMcp.Tests;
+
+/// <summary>
+/// Integration tests that exercise the MCP tool layer against a real solution
+/// (SharpCoder). Every assertion is a known-true fact about that codebase, so a
+/// pass means the tools return correct semantic answers, not just plausible JSON.
+/// Tests chain tools the way a real agent would: search for a symbol, then feed
+/// its declaration location into the position-based tools.
+/// </summary>
+public class SharpCoderSolutionTests : IAsyncLifetime
+{
+    private static readonly string SolutionPath =
+        Path.Combine(FindRepoRoot(), "..", "SharpCoder", "SharpCoder.sln");
+
+    static SharpCoderSolutionTests()
+    {
+        if (!MSBuildLocator.IsRegistered)
+        {
+            MSBuildLocator.RegisterDefaults();
+        }
+    }
+
+    public async Task InitializeAsync()
+    {
+        var result = Parse(await SolutionTools.LoadSolution(Path.GetFullPath(SolutionPath)));
+        result.GetProperty("projectCount").GetInt32().Should().BeGreaterThan(3,
+            "SharpCoder has Core, Mcp, UI, and test projects");
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    private static string FindRepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "RoslynMcp.slnx")) &&
+               !File.Exists(Path.Combine(dir, "RoslynMcp.sln")))
+        {
+            dir = Path.GetDirectoryName(dir);
+        }
+        return dir ?? throw new InvalidOperationException("Repo root not found");
+    }
+
+    private static JsonElement Parse(string json)
+    {
+        var element = JsonDocument.Parse(json).RootElement;
+        if (element.TryGetProperty("error", out var error))
+        {
+            throw new Xunit.Sdk.XunitException($"Tool returned error: {error.GetString()}");
+        }
+        return element;
+    }
+
+    private async Task<(string File, int Line, int Column)> FindDeclarationAsync(string name, string? kind = null)
+    {
+        var result = Parse(await SearchTools.SymbolSearch(name, kind));
+        var match = result.GetProperty("matches").EnumerateArray()
+            .First(m => m.GetProperty("symbol").GetProperty("name").GetString() == name);
+        var loc = match.GetProperty("locations").EnumerateArray().First();
+        return (loc.GetProperty("file").GetString()!,
+                loc.GetProperty("line").GetInt32(),
+                loc.GetProperty("column").GetInt32());
+    }
+
+    [Fact]
+    public async Task SymbolSearch_FindsClaudeCliRunner_InTheRightFile()
+    {
+        var (file, line, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+
+        file.Should().EndWith(Path.Combine("Services", "Claude", "ClaudeCliRunner.cs"));
+        line.Should().BeGreaterThan(1);
+    }
+
+    [Fact]
+    public async Task FindReferences_ClaudeCliRunner_FindsAllThreeConsumingServices()
+    {
+        var (file, line, column) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+
+        var result = Parse(await NavigationTools.FindReferences(file, line, column));
+
+        var files = result.GetProperty("references").EnumerateArray()
+            .Select(r => Path.GetFileName(r.GetProperty("file").GetString()!))
+            .Distinct()
+            .ToList();
+
+        // The known-true answer: the runner is consumed by exactly these services
+        files.Should().Contain("AgentOrchestrator.cs");
+        files.Should().Contain("SpecChatService.cs");
+        files.Should().Contain("DevelopmentChatService.cs");
+    }
+
+    [Fact]
+    public async Task FindImplementations_IAgentOrchestrator_FindsAgentOrchestrator()
+    {
+        var (file, line, column) = await FindDeclarationAsync("IAgentOrchestrator", "Interface");
+
+        var result = Parse(await NavigationTools.FindImplementations(file, line, column));
+
+        result.GetProperty("implementations").EnumerateArray()
+            .Select(i => i.GetProperty("symbol").GetProperty("name").GetString())
+            .Should().Contain("AgentOrchestrator");
+    }
+
+    [Fact]
+    public async Task GoToDefinition_FromUsageSite_ResolvesToDeclaration()
+    {
+        // Find a *usage* of FeatureStatus in FeatureService, then ask for its definition
+        var (statusFile, statusLine, statusCol) = await FindDeclarationAsync("FeatureStatus", "Enum");
+        var refs = Parse(await NavigationTools.FindReferences(statusFile, statusLine, statusCol));
+        var usage = refs.GetProperty("references").EnumerateArray()
+            .First(r => r.GetProperty("file").GetString()!.EndsWith("FeatureService.cs"));
+
+        var result = Parse(await NavigationTools.GoToDefinition(
+            usage.GetProperty("file").GetString()!,
+            usage.GetProperty("line").GetInt32(),
+            usage.GetProperty("column").GetInt32()));
+
+        result.GetProperty("definitions").EnumerateArray().First()
+            .GetProperty("file").GetString().Should().EndWith("Feature.cs");
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_SharpCoderCore_HasNoErrors()
+    {
+        var result = Parse(await DiagnosticsTools.GetDiagnostics("SharpCoder.Core", "Error"));
+
+        var counts = result.GetProperty("counts");
+        var hasErrors = counts.TryGetProperty("Error", out var errorCount) && errorCount.GetInt32() > 0;
+        hasErrors.Should().BeFalse("SharpCoder.Core compiles cleanly");
+    }
+
+    [Fact]
+    public async Task DocumentOutline_ClaudeCliRunner_ListsThePublicMethods()
+    {
+        var (file, _, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+
+        var result = Parse(await SearchTools.DocumentOutline(file));
+
+        var members = result.GetProperty("types").EnumerateArray().First()
+            .GetProperty("members").EnumerateArray()
+            .Select(m => m.GetProperty("name").GetString())
+            .ToList();
+
+        members.Should().Contain(m => m!.StartsWith("RunAsync("));
+        members.Should().Contain(m => m!.StartsWith("RunForTextAsync("));
+    }
+
+    [Fact]
+    public async Task RenameSymbolPreview_DoesNotModifyAnyFile()
+    {
+        var (file, line, column) = await FindDeclarationAsync("SessionChainService", "Class");
+        var contentBefore = await File.ReadAllTextAsync(file);
+
+        var result = Parse(await RefactorTools.RenameSymbolPreview(file, line, column, "SessionChainManager"));
+
+        result.GetProperty("changedFileCount").GetInt32().Should().BeGreaterThan(1,
+            "the class is used in MainWindowViewModel and App wiring");
+        (await File.ReadAllTextAsync(file)).Should().Be(contentBefore, "preview must not write");
+    }
+
+    [Fact]
+    public async Task FindReferences_OnBlankLine_ReturnsStructuredError()
+    {
+        // Out-of-range columns are deliberately clamped (agents give sloppy coordinates),
+        // so the true no-symbol case is a blank line
+        var (file, _, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+        var blankLine = (await File.ReadAllLinesAsync(file))
+            .Select((text, i) => (text, line: i + 1))
+            .First(l => string.IsNullOrWhiteSpace(l.text)).line;
+
+        var raw = await NavigationTools.FindReferences(file, blankLine, 1);
+
+        // Errors come back as JSON the agent can read, not protocol faults
+        JsonDocument.Parse(raw).RootElement.TryGetProperty("error", out _).Should().BeTrue();
+    }
+}
