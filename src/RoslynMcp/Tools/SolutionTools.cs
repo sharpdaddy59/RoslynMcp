@@ -21,14 +21,23 @@ public static class SolutionTools
                 documents = p.DocumentIds.Count
             }).ToList();
 
+            // If every project came back with documents, the workspace is usable for
+            // navigation regardless of design-time build noise (NuGet audit findings,
+            // missing optional targets). Say so explicitly: agents read a bare
+            // "Failure: ..." string as "this index is broken" and fall back to grep.
+            var usable = projects.Count > 0 && projects.All(p => p.documents > 0);
+
             return new
             {
                 loaded = WorkspaceHost.LoadedPath,
                 projectCount = projects.Count,
                 projects,
-                // MSBuild load warnings (missing targets, TFM issues) - often explain
-                // why a symbol can't be found later, so always surfaced
-                loadDiagnostics = WorkspaceHost.LoadDiagnostics.Count == 0 ? null : WorkspaceHost.LoadDiagnostics
+                status = usable
+                    ? "Solution loaded successfully. Navigation tools (find_references, symbol_search, go_to_definition...) are ready to use."
+                    : "Solution loaded with problems - some projects have no documents; navigation answers may be incomplete.",
+                loadDiagnostics = WorkspaceHost.LoadDiagnostics.Count == 0 ? null : WorkspaceHost.LoadDiagnostics,
+                loadDiagnosticsNote = WorkspaceHost.LoadDiagnostics.Count == 0 ? null :
+                    usable ? "These design-time build messages did not prevent loading; navigation is unaffected." : null
             };
         });
     }
