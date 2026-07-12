@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,8 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      # The integration tests load a sibling SharpCoder checkout that doesn't
-      # exist on CI runners - they run locally (dotnet test). CI gates the build.
-      # TODO: add a self-contained fixture solution so tests can run here too.
+      # FixtureSolutionTests run against the in-repo fixtures/FixtureSolution
+      # (self-restoring). SharpCoderSolutionTests skip visibly here - they need
+      # the sibling SharpCoder checkout and run locally.
+      - name: Test
+        run: dotnet test --no-build --configuration Release

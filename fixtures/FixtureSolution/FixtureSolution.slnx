@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FixtureApp/FixtureApp.csproj" />
+  <Project Path="FixtureLib/FixtureLib.csproj" />
+</Solution>

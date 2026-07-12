@@ -13,6 +13,7 @@ namespace RoslynMcp.Tests;
 /// Tests chain tools the way a real agent would: search for a symbol, then feed
 /// its declaration location into the position-based tools.
 /// </summary>
+[Collection("workspace")]  // WorkspaceHost is a process-wide singleton: classes that load solutions must not run in parallel
 public class SharpCoderSolutionTests : IAsyncLifetime
 {
     private static readonly string SolutionPath =
@@ -28,6 +29,11 @@ public class SharpCoderSolutionTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // On CI there is no sibling SharpCoder checkout - skip (visibly) rather than fail;
+        // FixtureSolutionTests provides the CI-safe coverage
+        Skip.IfNot(File.Exists(Path.GetFullPath(SolutionPath)),
+            "SharpCoder solution not found (sibling checkout required - runs locally only)");
+
         var result = Parse(await SolutionTools.LoadSolution(Path.GetFullPath(SolutionPath)));
         result.GetProperty("projectCount").GetInt32().Should().BeGreaterThan(3,
             "SharpCoder has Core, Mcp, UI, and test projects");
@@ -67,7 +73,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
                 loc.GetProperty("column").GetInt32());
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task SymbolSearch_FindsClaudeCliRunner_InTheRightFile()
     {
         var (file, line, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
@@ -76,7 +82,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
         line.Should().BeGreaterThan(1);
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task FindReferences_ClaudeCliRunner_FindsAllThreeConsumingServices()
     {
         var (file, line, column) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
@@ -94,7 +100,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
         files.Should().Contain("DevelopmentChatService.cs");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task FindImplementations_IAgentOrchestrator_FindsAgentOrchestrator()
     {
         var (file, line, column) = await FindDeclarationAsync("IAgentOrchestrator", "Interface");
@@ -106,7 +112,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
             .Should().Contain("AgentOrchestrator");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task GoToDefinition_FromUsageSite_ResolvesToDeclaration()
     {
         // Find a *usage* of FeatureStatus in FeatureService, then ask for its definition
@@ -124,7 +130,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
             .GetProperty("file").GetString().Should().EndWith("Feature.cs");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task GetDiagnostics_SharpCoderCore_HasNoErrors()
     {
         var result = Parse(await DiagnosticsTools.GetDiagnostics("SharpCoder.Core", "Error"));
@@ -134,7 +140,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
         hasErrors.Should().BeFalse("SharpCoder.Core compiles cleanly");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task DocumentOutline_ClaudeCliRunner_ListsThePublicMethods()
     {
         var (file, _, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
@@ -150,7 +156,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
         members.Should().Contain(m => m!.StartsWith("RunForTextAsync("));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RenameSymbolPreview_DoesNotModifyAnyFile()
     {
         var (file, line, column) = await FindDeclarationAsync("SessionChainService", "Class");
@@ -163,7 +169,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
         (await File.ReadAllTextAsync(file)).Should().Be(contentBefore, "preview must not write");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task FindReferences_OnBlankLine_ReturnsStructuredError()
     {
         // Out-of-range columns are deliberately clamped (agents give sloppy coordinates),
