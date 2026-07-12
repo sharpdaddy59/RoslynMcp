@@ -38,7 +38,35 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-Then in a session: ask Claude to `load_solution` your .sln and navigate semantically.
+## How a session actually uses it
+
+**1. Load first.** Every other tool answers "no solution loaded" until `load_solution`
+runs. If a later symbol lookup mysteriously fails, check the `loadDiagnostics` array
+that `load_solution` returned — MSBuild load warnings (missing SDK/workload, bad
+project) usually explain it.
+
+**2. Chain from search to navigation.** You rarely know file/line/column up front.
+The pattern is name-first:
+
+```
+symbol_search("ClaudeCliRunner")            -> returns declaration file/line/column
+find_references(file, line, column)         -> every real usage, no false grep hits
+go_to_definition / find_implementations     -> same coordinates, different questions
+```
+
+Positions are 1-based; slightly-off columns are fine (they clamp to the nearest token
+on the line).
+
+**3. Reload after editing.** The loaded solution is a snapshot from load time. If you
+(or an agent) edit files, the answers keep describing the OLD code until you run
+`load_solution` again. Rule of thumb: re-load after each batch of edits, before
+trusting any navigation answer.
+
+**4. Prefer it over text search when meaning matters.** `find_references` on `Save`
+returns only calls to *this* `Save` — not the 40 other `Save`s, comments, or strings
+that grep returns. `get_diagnostics` beats a full `dotnet build` for a quick
+"does it still compile?". `document_outline` beats reading a 700-line file to find
+one method.
 
 ## Requirements
 
