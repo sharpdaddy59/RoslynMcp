@@ -9,11 +9,22 @@ public static class SolutionTools
     [McpServerTool]
     [Description("Load a C# solution (.sln/.slnx) or project (.csproj) for semantic analysis. Must be called before any other tool. Replaces any previously loaded solution.")]
     public static Task<string> LoadSolution(
-        [Description("Absolute path to the .sln, .slnx, or .csproj file")] string path)
+        [Description("Absolute path to the .sln, .slnx, or .csproj file")] string? path = null,
+        [Description("Alias for 'path' (either name is accepted)")] string? solutionPath = null)
     {
+        // Both parameter spellings are accepted deliberately. Uptake experiment round 2
+        // (2026-07-14): the model guessed 'solutionPath' five times in a row, the SDK's
+        // binding failure surfaced as an opaque "An error occurred invoking
+        // 'load_solution'", and the agent - with nothing to self-correct from -
+        // abandoned the server entirely. Signatures here are ergonomics for a language
+        // model; required-parameter binding errors are unrecoverable dead ends.
         return ToolJson.GuardAsync(async () =>
         {
-            var solution = await WorkspaceHost.LoadAsync(path);
+            var effectivePath = path ?? solutionPath
+                ?? throw new ArgumentException(
+                    "Missing required argument: pass the absolute .sln/.slnx/.csproj path as 'path' (or 'solutionPath').");
+
+            var solution = await WorkspaceHost.LoadAsync(effectivePath);
             var projects = solution.Projects.Select(p => new
             {
                 name = p.Name,
