@@ -3,3 +3,9 @@ obj/
 *.user
 .vs/
 .idea/
+
+# SharpCoder pipeline artifacts (agent-run working files, not product code)
+sharpcoder.db
+.mcp.json
+prompts/
+plan-v2.json
