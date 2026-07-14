@@ -1,3 +1,6 @@
+using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
@@ -121,6 +124,75 @@ public static class MutationApplier
             WorkspaceHost.RefreshFileSnapshot(filePath);
         }
 
+        foreach (var projectChange in projectChanges)
+        {
+            var addedPaths = projectChange.GetAddedDocuments()
+                .Select(id => WorkspaceHost.Current.GetDocument(id)?.FilePath)
+                .OfType<string>()
+                .ToHashSet();
+            if (addedPaths.Count == 0) continue;
+
+            var csprojPath = WorkspaceHost.Current.GetProject(projectChange.ProjectId)?.FilePath;
+            if (csprojPath is not null && File.Exists(csprojPath))
+            {
+                RemoveRedundantSdkCompileIncludes(csprojPath, addedPaths);
+            }
+        }
+
         return MutationResult.Success(changedFilePaths);
+    }
+
+    /// <summary>
+    /// Workspace.TryApplyChanges adds an explicit <c>&lt;Compile Include&gt;</c> item for every
+    /// newly-added document, even in SDK-style projects where the file is already picked up by
+    /// the implicit glob - left in place, the next MSBuild-based build fails with "duplicate
+    /// Compile items". Our own compile-before-write check wouldn't have caught that (it compiles
+    /// in memory, not via MSBuild), so strip the now-redundant entries for files this mutation
+    /// just added. Projects that opt out of default globbing keep their explicit items.
+    /// </summary>
+    private static void RemoveRedundantSdkCompileIncludes(string csprojPath, HashSet<string> addedFullPaths)
+    {
+        var xml = XDocument.Load(csprojPath, LoadOptions.PreserveWhitespace);
+        var root = xml.Root;
+        if (root is null || root.Attribute("Sdk") is null) return;
+
+        var disablesDefaultItems = root.Descendants("EnableDefaultCompileItems")
+            .Any(e => bool.TryParse(e.Value.Trim(), out var v) && !v);
+        if (disablesDefaultItems) return;
+
+        var projectDir = Path.GetDirectoryName(csprojPath)!;
+        var changed = false;
+
+        foreach (var itemGroup in root.Elements("ItemGroup").ToList())
+        {
+            foreach (var compileItem in itemGroup.Elements("Compile").ToList())
+            {
+                var include = (string?)compileItem.Attribute("Include");
+                if (include is null) continue;
+
+                var fullPath = Path.GetFullPath(Path.Combine(projectDir, include));
+                if (addedFullPaths.Contains(fullPath))
+                {
+                    compileItem.Remove();
+                    changed = true;
+                }
+            }
+
+            if (!itemGroup.HasElements)
+            {
+                var precedingWhitespace = itemGroup.PreviousNode as XText;
+                itemGroup.Remove();
+                if (precedingWhitespace is { Value.Length: > 0 } && string.IsNullOrWhiteSpace(precedingWhitespace.Value))
+                {
+                    precedingWhitespace.Remove();
+                }
+            }
+        }
+
+        if (!changed) return;
+
+        var settings = new XmlWriterSettings { OmitXmlDeclaration = true, Encoding = new UTF8Encoding(false) };
+        using var writer = XmlWriter.Create(csprojPath, settings);
+        xml.Save(writer);
     }
 }
