@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -13,6 +14,8 @@ public static class WorkspaceHost
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static MSBuildWorkspace? _workspace;
     private static Solution? _solution;
+    private static Dictionary<ProjectId, HashSet<string>> _baselineErrors = new();
+    private static Dictionary<string, DateTime> _fileSnapshots = new();
 
     public static string? LoadedPath { get; private set; }
     public static IReadOnlyList<string> LoadDiagnostics { get; private set; } = [];
@@ -50,12 +53,89 @@ public static class WorkspaceHost
                 .Select(d => $"{d.Kind}: {d.Message}")
                 .ToArray();
 
+            await CaptureBaselineAsync(solution, cancellationToken);
+
             return solution;
         }
         finally
         {
             Gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Snapshot taken at load time: pre-existing compile errors per project (so later
+    /// mutations only get blocked by NEW errors) and on-disk write times per file (so
+    /// later mutations can detect external edits made after load - see MutationApplier).
+    /// </summary>
+    private static async Task CaptureBaselineAsync(Solution solution, CancellationToken cancellationToken)
+    {
+        var baselineErrors = new Dictionary<ProjectId, HashSet<string>>();
+        var fileSnapshots = new Dictionary<string, DateTime>();
+
+        foreach (var project in solution.Projects)
+        {
+            var compilation = await project.GetCompilationAsync(cancellationToken);
+            var errors = compilation?.GetDiagnostics(cancellationToken)
+                .Where(d => d.Severity == DiagnosticSeverity.Error)
+                .Select(DiagnosticKey)
+                .ToHashSet() ?? [];
+            baselineErrors[project.Id] = errors;
+
+            foreach (var document in project.Documents)
+            {
+                if (document.FilePath is { } path && File.Exists(path))
+                {
+                    fileSnapshots[path] = File.GetLastWriteTimeUtc(path);
+                }
+            }
+        }
+
+        _baselineErrors = baselineErrors;
+        _fileSnapshots = fileSnapshots;
+    }
+
+    /// <summary>Identity of a diagnostic that's stable across unrelated edits to the same file.</summary>
+    internal static string DiagnosticKey(Diagnostic d) =>
+        $"{d.Id}|{d.Location.SourceTree?.FilePath}|{d.GetMessage()}";
+
+    /// <summary>Pre-existing errors for a project as captured at load time; empty if the project is new since load.</summary>
+    internal static IReadOnlySet<string> GetBaselineErrors(ProjectId projectId) =>
+        _baselineErrors.TryGetValue(projectId, out var errors) ? errors : (IReadOnlySet<string>)ImmutableHashSet<string>.Empty;
+
+    /// <summary>True if a file tracked at load time (or since refreshed) has a different on-disk write time now.</summary>
+    internal static bool HasChangedOnDiskSinceSnapshot(string filePath)
+    {
+        if (!_fileSnapshots.TryGetValue(filePath, out var snapshot)) return false;
+        if (!File.Exists(filePath)) return true;
+        return File.GetLastWriteTimeUtc(filePath) != snapshot;
+    }
+
+    /// <summary>Call after successfully writing a file so future staleness checks compare against the new state.</summary>
+    internal static void RefreshFileSnapshot(string filePath)
+    {
+        if (File.Exists(filePath))
+        {
+            _fileSnapshots[filePath] = File.GetLastWriteTimeUtc(filePath);
+        }
+    }
+
+    /// <summary>
+    /// Applies a candidate solution's changes to disk via the underlying Workspace and
+    /// updates the tracked current solution. Callers must have already verified the
+    /// candidate compiles cleanly - see MutationApplier, the only sanctioned entry point
+    /// for write-side tools.
+    /// </summary>
+    internal static bool TryApplyChanges(Solution candidateSolution)
+    {
+        var workspace = _workspace
+            ?? throw new InvalidOperationException(
+                "No solution loaded. Call load_solution with a path to a .sln/.slnx/.csproj first.");
+
+        if (!workspace.TryApplyChanges(candidateSolution)) return false;
+
+        _solution = workspace.CurrentSolution;
+        return true;
     }
 
     public static Solution Current => _solution
