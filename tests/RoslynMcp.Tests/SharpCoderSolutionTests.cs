@@ -73,19 +73,26 @@ public class SharpCoderSolutionTests : IAsyncLifetime
                 loc.GetProperty("column").GetInt32());
     }
 
-    [SkippableFact]
-    public async Task SymbolSearch_FindsClaudeCliRunner_InTheRightFile()
-    {
-        var (file, line, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+    // NOTE: these tests originally asserted on ClaudeCliRunner, which SharpCoder
+    // deleted on 2026-07-12 when it moved to the ClaudeCode.Net package - they
+    // failed locally for two days while CI (which skips them) stayed green.
+    // Retargeted to AgentOrchestrator, and where possible the assertions are now
+    // structural facts rather than exact counts, so routine SharpCoder refactors
+    // don't silently break this suite again.
 
-        file.Should().EndWith(Path.Combine("Services", "Claude", "ClaudeCliRunner.cs"));
+    [SkippableFact]
+    public async Task SymbolSearch_FindsAgentOrchestrator_InTheRightFile()
+    {
+        var (file, line, _) = await FindDeclarationAsync("AgentOrchestrator", "Class");
+
+        file.Should().EndWith(Path.Combine("Services", "AgentOrchestrator.cs"));
         line.Should().BeGreaterThan(1);
     }
 
     [SkippableFact]
-    public async Task FindReferences_ClaudeCliRunner_FindsAllThreeConsumingServices()
+    public async Task FindReferences_AgentOrchestrator_FindsTheCompositionRoots()
     {
-        var (file, line, column) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+        var (file, line, column) = await FindDeclarationAsync("AgentOrchestrator", "Class");
 
         var result = Parse(await NavigationTools.FindReferences(file, line, column));
 
@@ -94,10 +101,10 @@ public class SharpCoderSolutionTests : IAsyncLifetime
             .Distinct()
             .ToList();
 
-        // The known-true answer: the runner is consumed by exactly these services
-        files.Should().Contain("AgentOrchestrator.cs");
-        files.Should().Contain("SpecChatService.cs");
-        files.Should().Contain("DevelopmentChatService.cs");
+        // Known-true: the class is instantiated in the UI's DI wiring and the
+        // headless host (interface consumers reference IAgentOrchestrator instead)
+        files.Should().Contain("App.axaml.cs");
+        files.Should().Contain("Program.cs");
     }
 
     [SkippableFact]
@@ -141,9 +148,9 @@ public class SharpCoderSolutionTests : IAsyncLifetime
     }
 
     [SkippableFact]
-    public async Task DocumentOutline_ClaudeCliRunner_ListsThePublicMethods()
+    public async Task DocumentOutline_AgentOrchestrator_ListsThePublicMethods()
     {
-        var (file, _, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+        var (file, _, _) = await FindDeclarationAsync("AgentOrchestrator", "Class");
 
         var result = Parse(await SearchTools.DocumentOutline(file));
 
@@ -152,8 +159,8 @@ public class SharpCoderSolutionTests : IAsyncLifetime
             .Select(m => m.GetProperty("name").GetString())
             .ToList();
 
-        members.Should().Contain(m => m!.StartsWith("RunAsync("));
-        members.Should().Contain(m => m!.StartsWith("RunForTextAsync("));
+        members.Should().Contain(m => m!.StartsWith("StartSessionAsync("));
+        members.Should().Contain(m => m!.StartsWith("StopSessionAsync("));
     }
 
     [SkippableFact]
@@ -174,7 +181,7 @@ public class SharpCoderSolutionTests : IAsyncLifetime
     {
         // Out-of-range columns are deliberately clamped (agents give sloppy coordinates),
         // so the true no-symbol case is a blank line
-        var (file, _, _) = await FindDeclarationAsync("ClaudeCliRunner", "Class");
+        var (file, _, _) = await FindDeclarationAsync("AgentOrchestrator", "Class");
         var blankLine = (await File.ReadAllLinesAsync(file))
             .Select((text, i) => (text, line: i + 1))
             .First(l => string.IsNullOrWhiteSpace(l.text)).line;
