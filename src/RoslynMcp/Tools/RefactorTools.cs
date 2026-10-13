@@ -83,7 +83,7 @@ public static class RefactorTools
         });
     }
 
-    private static async Task<List<object>> DescribeDocumentChangesAsync(
+    internal static async Task<List<object>> DescribeDocumentChangesAsync(
         Solution before, Solution after, int maxDocuments)
     {
         var changes = new List<object>();
