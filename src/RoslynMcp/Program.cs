@@ -19,7 +19,7 @@ builder.Services
     {
         // v2 adds the write-side tools (apply_rename, extract_interface) and
         // find_unused_members - bump so clients can tell v1 (read-only) from v2 apart.
-        options.ServerInfo = new Implementation { Name = "RoslynMcp", Version = "2.0.0" };
+        options.ServerInfo = new Implementation { Name = "RoslynMcp", Version = "2.1.0" };
     })
     .WithStdioServerTransport()
     .WithToolsFromAssembly();

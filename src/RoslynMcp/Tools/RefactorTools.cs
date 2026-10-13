@@ -47,7 +47,7 @@ public static class RefactorTools
         [Description("Absolute path of the file containing the symbol (use with line+column)")] string? filePath = null,
         [Description("1-based line number of the symbol (use with filePath)")] int? line = null,
         [Description("1-based column of the symbol (use with filePath)")] int? column = null,
-        [Description("Fully-qualified metadata name of the symbol instead of a position, e.g. 'FixtureLib.ProcessorBase.Process(System.String)' or 'FixtureLib.Greeter'")] string? fullyQualifiedName = null,
+        [Description("Fully-qualified metadata name of the symbol instead of a position, e.g. 'FixtureLib.ProcessorBase.Process(string)' or 'FixtureLib.Greeter'")] string? fullyQualifiedName = null,
         [Description("Also rename occurrences inside string literals (default false)")] bool renameInStrings = false,
         [Description("Also rename occurrences inside comments (default false)")] bool renameInComments = false)
     {

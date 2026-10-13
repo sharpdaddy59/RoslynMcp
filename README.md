@@ -25,6 +25,10 @@ dead-member detection — through a shared compile-before-write safety check. Re
 | `apply_rename` (v2) | Solution-wide rename that writes to disk |
 | `extract_interface` (v2) | Generate an interface from a class's public members |
 | `find_unused_members` (v2) | Zero-reference member detection, two honesty tiers |
+| `find_callers` (v2.1) | Incoming call tree: who calls this, who calls those, dispatch-aware |
+| `delete_member` (v2.1) | Remove a member or type after a solution-wide reference check |
+| `move_type_to_file` (v2.1) | Move a type out of a multi-type file into its own file |
+| `change_signature` (v2.1) | Add, remove, or reorder parameters across the whole override group and every call site |
 
 Positions are 1-based line/column. Out-of-range columns clamp to the line's end, because
 agents give sloppy coordinates. All errors return as structured JSON (`{"error": ...}`),
@@ -33,6 +37,9 @@ never protocol faults.
 The original nine tools are read-only: nothing they do modifies your code.
 `apply_rename` and `extract_interface` write to disk; `find_unused_members` is
 read-only. All three are covered in the "v2: tools that edit" section below.
+v2.1 adds one more read-only tool (`find_callers`) and three more that write
+(`delete_member`, `move_type_to_file`, `change_signature`), all under the same
+compile-before-write contract; see "v2.1" at the end.
 
 ## Usage with Claude Code
 
@@ -278,3 +285,67 @@ clean previews — so green means the answers are right, not just well-formed.
 ## License
 
 MIT
+
+## v2.1: closing the loops
+
+Every v2.1 write tool goes through the same `MutationApplier` contract described
+above: staleness check, compile the candidate, compare against the load-time
+baseline, write or report the real diagnostics. Full reference for each tool,
+including result shapes and worked examples, lives in `docs/v2.1-*.md`.
+
+### `find_callers` (read-only)
+
+One level up from `find_references`: a transitive **incoming** call hierarchy.
+Identify a method, constructor, property, or event by position or fully-qualified
+name; get level-1 callers with exact call sites, their callers, and so on to
+`depth` (default 3, max 10), capped at `maxNodes` (`truncated: true` when hit).
+Dispatch-aware by default: for an override or interface implementation, callers
+that reach it through the base or interface declaration are included and labelled
+`via` (a `base.X()` call is excluded, since it never dispatches down). Recursion
+shows as a `cycle: true` leaf; a member already shown elsewhere is `seenBefore`;
+the program entry point is `isEntryPoint`. Use it before `change_signature` or
+`delete_member` to see the blast radius. Static analysis only: reflection, DI
+containers and stored delegates are invisible, and every call through an interface
+counts as reaching every implementation.
+
+### `delete_member`
+
+Closes the `find_unused_members` loop: find, then delete. Resolves a member
+(method, constructor, property, indexer, field, event, nested type) or a whole
+top-level type, runs a solution-wide reference check first, and **refuses** with
+the reference sites listed if anything still uses it, or if it implements an
+interface member declared in the solution or overrides an abstract member. The
+declaration goes with its doc comments and attributes; in a multi-declarator
+field only that declarator is removed. `force: true` deletes anyway, but the
+compile gate still rejects with the real diagnostics (CS0103, CS0535...) if the
+solution would stop compiling. A publicly visible symbol carries a `note` that
+consumers outside the solution can't be seen. It never deletes files: a type
+deletion that empties a file reports `fileNowEmpty: true` and leaves the file.
+
+### `move_type_to_file`
+
+Moves one top-level type out of a file holding several into `<TypeName>.cs` next to
+it (or `destinationFileName`), same project. The new file gets the source file's
+usings exactly as written (global usings excepted, since they already apply
+project-wide), the same namespace form (file-scoped or block, including usings
+nested inside the block), and the type moved unchanged with its doc comments and
+attributes. Refuses nested types, partial types split across files, an existing
+destination, and no-op moves. The csproj is left byte-identical: MSBuild's save
+would otherwise drop the final newline, so `MutationApplier` now restores a csproj
+that differs only in trailing whitespace (this also fixes the same one-byte drift
+`extract_interface` used to leave).
+
+### `change_signature`
+
+Add, remove, or reorder parameters on a method or constructor, applied to the
+whole override and implementation group (the interface member, the base method,
+every override) and to every call site in the solution, including named arguments
+and `base.X(...)` calls. Unrelated overloads with the same name are never touched.
+`addParameters` takes `{ name, type, defaultValue?, callSiteValue?, index? }`: with
+`callSiteValue` every call gets that argument; with only `defaultValue` the
+parameter is optional and calls are left alone. `removeParameters` drops the
+parameter and its argument everywhere; if the body still reads it, the compile gate
+rejects with CS0103 and nothing is written. `newOrder` reorders declarations and
+positional arguments. A method used as a method group or delegate is refused with
+the locations listed rather than guessed at.
+
