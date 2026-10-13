@@ -114,6 +114,17 @@ public static class MutationApplier
             .Distinct()
             .ToList();
 
+        // Workspace.TryApplyChanges rewrites the project file of any project gaining a document
+        // (and MSBuild's save drops its final newline); snapshot the bytes so a net-zero rewrite
+        // can be undone exactly after RemoveRedundantSdkCompileIncludes.
+        var csprojSnapshots = projectChanges
+            .Where(pc => pc.GetAddedDocuments().Any())
+            .Select(pc => baseSolution.GetProject(pc.ProjectId)?.FilePath)
+            .OfType<string>()
+            .Where(File.Exists)
+            .Distinct()
+            .ToDictionary(path => path, File.ReadAllBytes);
+
         if (!WorkspaceHost.TryApplyChanges(candidateSolution))
         {
             return MutationResult.WorkspaceRejected();
@@ -136,10 +147,32 @@ public static class MutationApplier
             if (csprojPath is not null && File.Exists(csprojPath))
             {
                 RemoveRedundantSdkCompileIncludes(csprojPath, addedPaths);
+                if (csprojSnapshots.TryGetValue(csprojPath, out var originalBytes))
+                {
+                    RestoreIfOnlyTrailingWhitespaceDiffers(csprojPath, originalBytes);
+                }
             }
         }
 
         return MutationResult.Success(changedFilePaths);
+    }
+
+    /// <summary>
+    /// If the project file now differs from its pre-mutation bytes only in trailing whitespace
+    /// (MSBuild's save drops the final newline), put the original bytes back so the csproj is
+    /// byte-identical whenever the mutation made no real change to it.
+    /// </summary>
+    private static void RestoreIfOnlyTrailingWhitespaceDiffers(string csprojPath, byte[] originalBytes)
+    {
+        var current = File.ReadAllBytes(csprojPath);
+        if (current.AsSpan().SequenceEqual(originalBytes)) return;
+
+        var currentText = Encoding.UTF8.GetString(current).TrimStart('﻿').TrimEnd();
+        var originalText = Encoding.UTF8.GetString(originalBytes).TrimStart('﻿').TrimEnd();
+        if (string.Equals(currentText, originalText, StringComparison.Ordinal))
+        {
+            File.WriteAllBytes(csprojPath, originalBytes);
+        }
     }
 
     /// <summary>
