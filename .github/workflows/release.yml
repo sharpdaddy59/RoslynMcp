@@ -1,17 +1,16 @@
-name: Publish to NuGet
+name: GitHub Release
 
 on:
   push:
     tags:
-      - 'v*' # v2.1.0 etc. - the tag is the publish button
+      - 'v*' # v2.1.0 etc. - the tag is the release button
+
+permissions:
+  contents: write # create the release and attach the package
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write # GitHub OIDC token issuance for NuGet Trusted Publishing
-      contents: read
-
     steps:
       - uses: actions/checkout@v4
 
@@ -30,26 +29,19 @@ jobs:
           CSPROJ_VERSION=$(grep -oPm1 '(?<=<Version>)[^<]+' src/RoslynMcp/RoslynMcp.csproj)
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           if [ "$CSPROJ_VERSION" != "$TAG_VERSION" ]; then
-            echo "Tag $TAG_VERSION does not match csproj version $CSPROJ_VERSION - refusing to publish"
+            echo "Tag $TAG_VERSION does not match csproj version $CSPROJ_VERSION - refusing to release"
             exit 1
           fi
 
-      - name: Pack
+      - name: Pack the .NET tool
         run: dotnet pack src/RoslynMcp --configuration Release --output ./artifacts
 
-      # Trusted Publishing: exchange the GitHub OIDC token for a short-lived
-      # (1 hour) NuGet API key. No stored secrets - nuget.org validates this
-      # workflow against the trusted publishing policy on the sharpdaddy account
-      # (one policy per repository + workflow file).
-      - name: NuGet login (OIDC -> temp API key)
-        uses: NuGet/login@v1
-        id: login
-        with:
-          user: sharpdaddy
-
-      - name: Push to NuGet
+      # The nupkg is a .NET global tool package; installing from a local folder needs
+      # no feed: dotnet tool install -g RoslynMcp --add-source <folder with the nupkg>
+      - name: Create GitHub Release with the package attached
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          dotnet nuget push ./artifacts/*.nupkg \
-            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
-            --source https://api.nuget.org/v3/index.json \
-            --skip-duplicate
+          gh release create "$GITHUB_REF_NAME" ./artifacts/*.nupkg \
+            --title "RoslynMcp $GITHUB_REF_NAME" \
+            --generate-notes

@@ -43,13 +43,18 @@ compile-before-write contract; see "v2.1" at the end.
 
 ## Install
 
-RoslynMcp ships as a .NET global tool (needs the .NET 10 SDK, which the server also
-uses to load your solution through MSBuild):
+RoslynMcp ships as a .NET global tool, attached to each
+[GitHub Release](https://github.com/sharpdaddy59/RoslynMcp/releases) as a `.nupkg`
+(it is deliberately not on nuget.org: that id belongs to an unrelated project).
+Needs the .NET 10 SDK, which the server also uses to load your solution through MSBuild:
 
 ```bash
-dotnet tool install -g RoslynMcp        # puts `roslyn-mcp` on PATH
-dotnet tool update -g RoslynMcp         # later
+gh release download v2.1.0 -R sharpdaddy59/RoslynMcp -p '*.nupkg' -D /tmp/roslynmcp
+dotnet tool install -g RoslynMcp --add-source /tmp/roslynmcp    # puts `roslyn-mcp` on PATH
 ```
+
+To update, download the newer release and run `dotnet tool update -g RoslynMcp
+--add-source <that folder>`.
 
 ## Usage with Claude Code
 
