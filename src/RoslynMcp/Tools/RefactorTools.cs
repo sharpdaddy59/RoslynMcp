@@ -83,7 +83,7 @@ public static class RefactorTools
         });
     }
 
-    private static async Task<List<object>> DescribeDocumentChangesAsync(
+    internal static async Task<List<object>> DescribeDocumentChangesAsync(
         Solution before, Solution after, int maxDocuments)
     {
         var changes = new List<object>();
@@ -118,7 +118,7 @@ public static class RefactorTools
     /// against the loaded solution's compilations. Overload disambiguation via the parenthesized
     /// parameter list is best-effort; the first matching member wins if it doesn't disambiguate.
     /// </summary>
-    private static async Task<ISymbol> ResolveByFullyQualifiedNameAsync(Solution solution, string fullyQualifiedName)
+    internal static async Task<ISymbol> ResolveByFullyQualifiedNameAsync(Solution solution, string fullyQualifiedName)
     {
         var parenIndex = fullyQualifiedName.IndexOf('(');
         var namePortion = parenIndex >= 0 ? fullyQualifiedName[..parenIndex] : fullyQualifiedName;
