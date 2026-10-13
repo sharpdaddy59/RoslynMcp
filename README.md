@@ -41,9 +41,31 @@ v2.1 adds one more read-only tool (`find_callers`) and three more that write
 (`delete_member`, `move_type_to_file`, `change_signature`), all under the same
 compile-before-write contract; see "v2.1" at the end.
 
+## Install
+
+RoslynMcp ships as a .NET global tool (needs the .NET 10 SDK, which the server also
+uses to load your solution through MSBuild):
+
+```bash
+dotnet tool install -g RoslynMcp        # puts `roslyn-mcp` on PATH
+dotnet tool update -g RoslynMcp         # later
+```
+
 ## Usage with Claude Code
 
 Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "roslyn-mcp"
+    }
+  }
+}
+```
+
+Running from a clone instead (for hacking on the server itself):
 
 ```json
 {

@@ -8,7 +8,27 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>RoslynMcp</RootNamespace>
     <Version>2.1.0</Version>
+
+    <!-- Shipped as a .NET global tool: `dotnet tool install -g RoslynMcp` puts `roslyn-mcp`
+         on PATH, so a .mcp.json can name the command instead of a cloned repo path. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>roslyn-mcp</ToolCommandName>
+    <PackageId>RoslynMcp</PackageId>
+    <Authors>Greg Haley</Authors>
+    <Description>Semantic C# tools for Claude Code via MCP: Roslyn-backed find-references, go-to-definition, implementations, diagnostics, call hierarchy, and compile-gated edits (rename, extract interface, change signature, delete member, move type) for any .sln/.slnx/.csproj.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/sharpdaddy59/RoslynMcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sharpdaddy59/RoslynMcp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>roslyn;mcp;claude;claude-code;csharp;refactoring;agent</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <RollForward>Major</RollForward>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="0.6.0-preview.1" />
