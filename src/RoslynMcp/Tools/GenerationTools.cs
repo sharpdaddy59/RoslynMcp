@@ -17,7 +17,8 @@ public static class GenerationTools
         [Description("1-based line number of the class declaration (or any member of it)")] int line,
         [Description("1-based column")] int column,
         [Description("Optional: extract only these member names (default: all eligible public instance members)")] string[]? memberFilter = null,
-        [Description("Add the generated interface to the class's base list (default true)")] bool addToBaseList = true)
+        [Description("Add the generated interface to the class's base list (default true)")] bool addToBaseList = true,
+        [Description("Preview only: run every check and the compile gate, report the exact changes/conflicts the real call would produce, but write nothing (default false).")] bool dryRun = false)
     {
         return ToolJson.GuardAsync(async () =>
         {
@@ -110,14 +111,28 @@ public static class GenerationTools
             // and NormalizeWhitespace carries annotations that - combined with copied XML doc
             // comment trivia - corrupt the compiler's doc-comment bookkeeping (spurious CS1569)
             // when attached straight onto a Document. Re-parsing from text sidesteps that.
+            var interfaceText = interfaceFileRoot.ToFullString();
             candidateSolution = candidateSolution.AddDocument(
                 DocumentId.CreateNewId(classDocument.Project.Id),
                 interfaceFileName,
-                Microsoft.CodeAnalysis.Text.SourceText.From(interfaceFileRoot.ToFullString()),
+                Microsoft.CodeAnalysis.Text.SourceText.From(interfaceText),
                 classDocument.Folders,
                 interfaceFilePath);
 
-            var result = await MutationApplier.TryApplyAsync(candidateSolution);
+            var classChanges = await RefactorTools.DescribeDocumentChangesAsync(WorkspaceHost.Current, candidateSolution, maxDocuments: 10);
+            var result = await MutationApplier.ApplyOrPreviewAsync(candidateSolution, dryRun);
+
+            var changes = new List<object>();
+            if (result.Accepted)
+            {
+                changes.AddRange(classChanges);
+                changes.Add(new
+                {
+                    file = interfaceFilePath,
+                    added = true,
+                    edits = new[] { new { line = 1, oldText = "", newText = interfaceText } }
+                });
+            }
 
             return new
             {
@@ -126,9 +141,13 @@ public static class GenerationTools
                 memberCount = eligibleMembers.Count,
                 members = eligibleMembers.Select(m => m.Name).ToList(),
                 applied = result.Applied,
-                interfaceFilePath = result.Applied ? interfaceFilePath : null,
-                addedToBaseList = result.Applied && addToBaseList,
-                conflicts = result.Applied || result.NewErrors.Count == 0 ? null : result.NewErrors,
+                dryRun = RefactorTools.DryRunFlag(dryRun),
+                wouldApply = RefactorTools.WouldApplyFlag(dryRun, result),
+                interfaceFilePath = result.Accepted ? interfaceFilePath : null,
+                addedToBaseList = result.Accepted && addToBaseList,
+                changedFileCount = result.Accepted ? changes.Count : 0,
+                changes,
+                conflicts = result.Accepted || result.NewErrors.Count == 0 ? null : result.NewErrors,
                 staleFile = result.StaleFile,
                 message = result.Message
             };
