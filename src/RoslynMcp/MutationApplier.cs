@@ -205,7 +205,16 @@ public static class MutationApplier
 
         if (newErrors.Count > 0)
         {
-            return new Validation(projectChanges, [], MutationResult.RejectedNewErrors(newErrors));
+            // Affected projects come out of a HashSet and the compiler reports in parallel, so
+            // sort: the same rejection must read the same way on every call (dry run vs real).
+            var ordered = newErrors
+                .OrderBy(e => e.File, StringComparer.Ordinal)
+                .ThenBy(e => e.Line)
+                .ThenBy(e => e.Column)
+                .ThenBy(e => e.Id, StringComparer.Ordinal)
+                .ThenBy(e => e.Message, StringComparer.Ordinal)
+                .ToList();
+            return new Validation(projectChanges, [], MutationResult.RejectedNewErrors(ordered));
         }
 
         var changedFilePaths = touchedDocumentIds
