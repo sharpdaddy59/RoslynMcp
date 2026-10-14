@@ -410,11 +410,20 @@ the locations listed rather than guessed at.
 
 ## v2.2: previews, impact, fixes, namespaces, plugin
 
-v2.2 adds a dry-run mode to every write tool and ships RoslynMcp as a Claude Code
-plugin that installs itself on first launch. Every write tool, old and new, still goes
-through the `MutationApplier` contract: staleness check, compile the candidate, compare
-against the load-time baseline, write or report the real diagnostics. Design notes per
-item live in `docs/v2.2-*.md`.
+v2.2 adds a dry-run mode to every write tool, a blast-radius report
+(`analyze_change_impact`), Roslyn's own code fixes behind the compile gate
+(`apply_code_fix`, `list_code_fixes`), namespace moves (`move_type_to_namespace`,
+`rename_namespace`), stub generation after extraction (`implement_interface`,
+`implement_abstract`, `generate_overrides`), three small navigation tools
+(`get_symbol_info`, `get_type_hierarchy`, `find_unused_parameters`), and ships RoslynMcp
+as a Claude Code plugin that installs itself on first launch. Every write tool, old and
+new, goes through the `MutationApplier` contract: staleness check, compile the candidate,
+compare against the load-time baseline, write or report the real diagnostics. Of the
+other Roslyn MCP servers on nuget.org, the ones we read document preview/diff modes,
+freshness checks and rollback on a failed write; compiling the candidate first and
+refusing an edit that introduces new errors is, as far as their docs state, specific to
+this one. Design notes per item live in `docs/v2.2-*.md`; the fixtures each tool is
+proven against (with their answer keys) are under `fixtures/`.
 
 ### dryRun on every write tool
 

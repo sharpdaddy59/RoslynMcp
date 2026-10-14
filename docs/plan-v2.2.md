@@ -92,3 +92,16 @@ A (one agent) and G (one agent) in parallel; then B, C, D as three parallel work
 builders; E and F only if the window allows. Merge, full test, README, 2.2.0, push.
 Before claiming "compile-gated edits" as a differentiator anywhere public, check what
 glider's and dotMCP's edit guards actually do.
+
+## Run log (evening of 2026-10-13)
+All seven items landed on main the same evening: G, A, B, C, D, E, F in merge order,
+each built by its own worktree agent and merged by the orchestrator. Deviations from the
+checklist: B's fixture is a separate `fixtures/ImpactSolution` (the existing fixture's
+project count is asserted by eight test classes); E's fixture is a separate
+`fixtures/GenerationSolution` whose baseline errors are the missing members the tools
+generate; C needed no MEF host change (Roslyn 5.6 loads the Features assemblies when
+present) but adds ~4.4 MB to the nupkg; D moves a type out of a shared file-scoped
+namespace into its own file (C# forbids mixing block and file-scoped namespaces).
+Found and fixed along the way: the compile gate's rejected-diagnostics list was
+unordered, so a dry run and its real call could disagree on order; it is now sorted.
+Test count 55 -> 107. Not tagged; the release is Wily's call.

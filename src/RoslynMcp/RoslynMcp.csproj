@@ -15,7 +15,7 @@
     <ToolCommandName>roslyn-mcp</ToolCommandName>
     <PackageId>RoslynMcp</PackageId>
     <Authors>Greg Haley</Authors>
-    <Description>Semantic C# tools for Claude Code via MCP: Roslyn-backed find-references, go-to-definition, implementations, diagnostics, call hierarchy, and compile-gated edits (rename, extract interface, change signature, delete member, move type) for any .sln/.slnx/.csproj.</Description>
+    <Description>Semantic C# tools for Claude Code via MCP: Roslyn-backed find-references, go-to-definition, implementations, diagnostics, call hierarchy, change impact, and compile-gated edits with dry run (rename, extract interface, change signature, delete member, move type/namespace, code fixes, implement interface/abstract) for any .sln/.slnx/.csproj.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/sharpdaddy59/RoslynMcp</PackageProjectUrl>
