@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ImpactApp/ImpactApp.csproj" />
+  <Project Path="ImpactLib/ImpactLib.csproj" />
+  <Project Path="ImpactTests/ImpactTests.csproj" />
+</Solution>

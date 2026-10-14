@@ -403,7 +403,7 @@ public static class DeletionTools
         return contracts;
     }
 
-    private static bool IsExternallyVisible(ISymbol symbol)
+    internal static bool IsExternallyVisible(ISymbol symbol)
     {
         for (ISymbol? current = symbol; current is not null and not INamespaceSymbol; current = current.ContainingType)
         {

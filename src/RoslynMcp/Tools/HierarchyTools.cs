@@ -18,7 +18,7 @@ public static class HierarchyTools
     private const string TopLevelMainName = "<Main>$";
 
     /// <summary>Short member display used for "via" labels, e.g. "IStage.Run(string)".</summary>
-    private static readonly SymbolDisplayFormat ViaFormat = new(
+    internal static readonly SymbolDisplayFormat ViaFormat = new(
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
         memberOptions: SymbolDisplayMemberOptions.IncludeContainingType | SymbolDisplayMemberOptions.IncludeParameters,
@@ -89,7 +89,7 @@ public static class HierarchyTools
     /// The calling symbol Roslyn reports can be a lambda or an accessor; walk up to the
     /// member a reader (and the next FindCallers query) actually cares about.
     /// </summary>
-    private static ISymbol NormalizeCaller(ISymbol symbol)
+    internal static ISymbol NormalizeCaller(ISymbol symbol)
     {
         while (symbol is IMethodSymbol { MethodKind: MethodKind.AnonymousFunction } && symbol.ContainingSymbol is { } parent)
         {
@@ -103,10 +103,10 @@ public static class HierarchyTools
     }
 
     /// <summary>Identity that survives the same symbol being seen through different compilations.</summary>
-    private static string Key(ISymbol symbol) =>
+    internal static string Key(ISymbol symbol) =>
         $"{symbol.ContainingAssembly?.Name}|{symbol.GetDocumentationCommentId() ?? symbol.ToDisplayString()}";
 
-    private static async Task<HashSet<string>> GetEntryPointKeysAsync(Solution solution)
+    internal static async Task<HashSet<string>> GetEntryPointKeysAsync(Solution solution)
     {
         var keys = new HashSet<string>();
         foreach (var project in solution.Projects)
@@ -120,7 +120,7 @@ public static class HierarchyTools
         return keys;
     }
 
-    private static object DescribeSymbol(ISymbol symbol, bool isEntryPoint)
+    internal static object DescribeSymbol(ISymbol symbol, bool isEntryPoint)
     {
         if (symbol is IMethodSymbol { Name: TopLevelMainName })
         {
@@ -153,9 +153,9 @@ public static class HierarchyTools
                && access.Name.Span.Contains(location.SourceSpan);
     }
 
-    private sealed record DispatchMember(ISymbol Symbol, string Kind);
+    internal sealed record DispatchMember(ISymbol Symbol, string Kind);
 
-    private sealed record CallerEdge(ISymbol Caller, ISymbol? Via, string? ViaKind, List<Location> Locations);
+    internal sealed record CallerEdge(ISymbol Caller, ISymbol? Via, string? ViaKind, List<Location> Locations);
 
     private sealed class Node
     {
@@ -185,7 +185,11 @@ public static class HierarchyTools
         };
     }
 
-    private sealed class CallerWalker(Solution solution, bool includeDispatch, HashSet<string> entryPointKeys)
+    /// <summary>
+    /// Dispatch-aware caller lookup with a per-walk edge cache. Shared with
+    /// analyze_change_impact (ImpactTools), which runs its own BFS over GetCallerEdgesAsync.
+    /// </summary>
+    internal sealed class CallerWalker(Solution solution, bool includeDispatch, HashSet<string> entryPointKeys)
     {
         private readonly Dictionary<string, List<CallerEdge>> _edgeCache = new();
 
@@ -294,7 +298,7 @@ public static class HierarchyTools
             return group;
         }
 
-        private async Task<List<CallerEdge>> GetCallerEdgesAsync(ISymbol symbol)
+        public async Task<List<CallerEdge>> GetCallerEdgesAsync(ISymbol symbol)
         {
             var cacheKey = Key(symbol);
             if (_edgeCache.TryGetValue(cacheKey, out var cached)) return cached;
