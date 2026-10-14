@@ -482,3 +482,51 @@ Limits:
   other names are missed, and tests that reach the target only through reflection or DI are missed too.
 - Interface and virtual dispatch over-approximates. A test that calls `Pipeline.Execute`
   is reported for every `IStage.Run` implementation, not only the one it passes at runtime.
+
+### `apply_code_fix`
+
+Applies one of Roslyn's own C# code fixes to every occurrence of a diagnostic id in a file,
+project or the whole solution, then writes it through the same compile gate as every other
+write tool (refused if it would introduce a new compile error, or if a touched file changed
+on disk since load). Proven fixes: **CS8019** (remove unnecessary usings; `IDE0005` is accepted
+as an alias) and **CS0246** (add the missing `using` when the type exists in exactly one
+namespace in the solution). Uses the provider's FixAll where it supports the scope, otherwise
+fixes one diagnostic at a time and composes the edits.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `diagnosticId` | (required) | e.g. `CS8019`, `CS0246` |
+| `scope` | `solution` | `file`, `project` or `solution` |
+| `filePath` | | required for `scope: file`; for `scope: project` selects the file's project |
+| `projectName` | | for `scope: project` |
+| `fixTitle` | first action | pick among several actions by title substring, e.g. `using FixtureLib.Imports` |
+| `maxDiagnostics` | 500 | fix at most this many occurrences |
+| `dryRun` | false | compute + gate, report the exact changes, write nothing |
+
+Returns `diagnosticId, scope, diagnosticsFound, diagnosticsFixed, fixTitle, provider, applied,
+dryRun, wouldApply, changedFileCount, changes, conflicts, staleFile, message`. `changes` lists
+whole-line hunks per file (`{line, oldText, newText}`, texts include their line breaks). An id
+with no Roslyn fixer returns `applied: false` with a "Not fixable" message; an id with no
+occurrences in scope returns `diagnosticsFound: 0`.
+
+```jsonc
+// apply_code_fix { "diagnosticId": "CS8019", "scope": "file", "filePath": ".../Fixable.cs", "dryRun": true }
+{ "diagnosticId": "CS8019", "scope": "file", "diagnosticsFound": 3, "diagnosticsFixed": 3,
+  "fixTitle": "Remove unnecessary usings", "provider": "RemoveUnnecessaryImports", "fixAll": true,
+  "applied": false, "dryRun": true, "wouldApply": true, "changedFileCount": 1,
+  "changes": [{ "file": ".../Fixable.cs", "edits": [
+    { "line": 1, "oldText": "using System.Text;\nusing System.Collections.Concurrent;\n", "newText": "" },
+    { "line": 4, "oldText": "using System.Net;\n", "newText": "" } ] }],
+  "message": "Dry run: the edit would be applied; 1 file(s) would change. Nothing was written." }
+```
+
+### `list_code_fixes` (read-only)
+
+Lists the compiler diagnostics in a file, project or the solution, Hidden severity included
+by default (so CS8019 unnecessary usings show up), grouped by id with a count and up to 20
+locations each, and for each id whether a Roslyn code fix exists: `fixable`, `providers`,
+`fixAllSupported` (and `fixedVia` when the fixer is registered under another id, as with
+CS8019). Parameters: `diagnosticId?`, `scope` (`file` | `project` | `solution`, default
+`solution`), `filePath?`, `projectName?`, `includeHidden` (default true). Ordering is
+deterministic (ids ordinal; locations by file, then position). Analyzer-only IDE diagnostics
+are not computed, and files under `bin/` and `obj/` are excluded.
