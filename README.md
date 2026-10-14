@@ -432,3 +432,53 @@ compile-gate verdict.
   "message": "Dry run: the edit would be applied; 2 file(s) would change. Nothing was written."
 }
 ```
+
+### `analyze_change_impact` (read-only)
+
+Shows the blast radius of changing a symbol before you change it: who depends on it,
+which projects rebuild, and which tests to run. Identify the symbol by
+`filePath`+`line`+`column`, by `fullyQualifiedName`, or by a batch in `fullyQualifiedNames`
+(analyzed as one change). Works for methods, constructors, properties, events, fields and types.
+
+- `dependents`: transitive dependents up to `depth` (default 3, max 10), grouped by
+  project. These are callers (dispatch-aware, the same edges as `find_callers`, with `via` when a
+  call goes through a base or interface member), overrides and implementations of the target, and for
+  types and fields every member that references them. Each entry has `distance`, `relation`
+  (`caller` / `reference` / `override` / `implementation`) and `reaches` (the next hop toward
+  the target).
+- `projectsToRecompile`: the target's project plus every project that transitively depends on it.
+- `tests`: test methods that reach a target within `depth`, each with the shortest call path
+  from the test down to the target.
+- `maxNodes` (default 500, max 5000) caps the dependents. `truncated: true` means the cap was hit.
+
+```json
+{
+  "targets": [{ "name": "Execute", "kind": "Method", "display": "ImpactLib.Pipeline.Execute(ImpactLib.IStage, string)", "containingType": "ImpactLib.Pipeline" }],
+  "depth": 3,
+  "nodeCount": 5,
+  "truncated": false,
+  "projectsToRecompile": ["ImpactApp", "ImpactLib", "ImpactTests"],
+  "dependents": [
+    { "project": "ImpactApp", "members": [
+      { "symbol": "ImpactApp.Program.Main", "kind": "Method", "relation": "caller", "file": ".../Program.cs", "line": 7, "column": 24, "distance": 1, "reaches": "ImpactLib.Pipeline.Execute", "isEntryPoint": true } ] },
+    { "project": "ImpactTests", "members": [
+      { "symbol": "ImpactTests.PipelineTests.ExecuteViaHelper", "kind": "Method", "relation": "caller", "file": ".../PipelineTests.cs", "line": 15, "column": 17, "distance": 2, "reaches": "ImpactTests.PipelineTests.RunTrim" } ] }
+  ],
+  "tests": [
+    { "symbol": "ImpactTests.PipelineTests.ExecuteViaHelper", "project": "ImpactTests", "file": ".../PipelineTests.cs", "line": 15, "column": 17, "distance": 2,
+      "path": ["ImpactTests.PipelineTests.ExecuteViaHelper", "ImpactTests.PipelineTests.RunTrim", "ImpactLib.Pipeline.Execute"] }
+  ],
+  "note": "At least one target is publicly visible: dependents were found only inside the loaded solution. External consumers (...) can't be seen."
+}
+```
+
+Limits:
+- Only the loaded solution is visible. Consumers in other repositories or packages are not, and
+  a `note` says so when a target is publicly visible.
+- Reflection, DI registration, serialization and source-generated wiring are invisible. A
+  dependency that exists only at runtime won't show up.
+- Test detection is by attribute name (`Fact`, `Theory`, `Test`, `TestCase`, `TestMethod`,
+  `SkippableFact`, `SkippableTheory`). Tests discovered by convention or by custom attributes with
+  other names are missed, and tests that reach the target only through reflection or DI are missed too.
+- Interface and virtual dispatch over-approximates. A test that calls `Pipeline.Execute`
+  is reported for every `IStage.Run` implementation, not only the one it passes at runtime.
