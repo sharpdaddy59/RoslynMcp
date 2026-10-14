@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>RoslynMcp</RootNamespace>
-    <Version>2.1.0</Version>
+    <Version>2.2.0</Version>
 
     <!-- Shipped as a .NET global tool: `dotnet tool install -g RoslynMcp` puts `roslyn-mcp`
          on PATH, so a .mcp.json can name the command instead of a cloned repo path. -->

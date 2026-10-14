@@ -29,6 +29,11 @@ dead-member detection — through a shared compile-before-write safety check. Re
 | `delete_member` (v2.1) | Remove a member or type after a solution-wide reference check |
 | `move_type_to_file` (v2.1) | Move a type out of a multi-type file into its own file |
 | `change_signature` (v2.1) | Add, remove, or reorder parameters across the whole override group and every call site |
+| `analyze_change_impact` (v2.2) | Blast radius: transitive dependents by project, projects to recompile, tests that reach the symbol with paths |
+| `list_code_fixes` (v2.2) | Diagnostics in scope, grouped by id, with whether a Roslyn code fix exists |
+| `apply_code_fix` (v2.2) | Apply a Roslyn code fix (unused usings, missing using) across file/project/solution, compile-gated |
+| `move_type_to_namespace` (v2.2) | Move a type to another namespace: all partial parts, every reference, usings added |
+| `rename_namespace` (v2.2) | Rename a namespace and its children across the solution; merge only when asked |
 
 Positions are 1-based line/column. Out-of-range columns clamp to the line's end, because
 agents give sloppy coordinates. All errors return as structured JSON (`{"error": ...}`),
@@ -40,6 +45,8 @@ read-only. All three are covered in the "v2: tools that edit" section below.
 v2.1 adds one more read-only tool (`find_callers`) and three more that write
 (`delete_member`, `move_type_to_file`, `change_signature`), all under the same
 compile-before-write contract; see "v2.1" at the end.
+v2.2 adds `dryRun` to every write tool, a Claude Code plugin that installs the server on
+first launch, and the tools marked v2.2 above; see "v2.2" at the end.
 
 ## Install as a Claude Code plugin
 
@@ -66,8 +73,8 @@ RoslynMcp ships as a .NET global tool, attached to each
 Needs the .NET 10 SDK, which the server also uses to load your solution through MSBuild:
 
 ```bash
-gh release download v2.1.0 -R sharpdaddy59/RoslynMcp -p '*.nupkg' -D /tmp/roslynmcp
-dotnet tool install -g RoslynMcp --version 2.1.0 --add-source /tmp/roslynmcp    # puts `roslyn-mcp` on PATH
+gh release download v2.2.0 -R sharpdaddy59/RoslynMcp -p '*.nupkg' -D /tmp/roslynmcp
+dotnet tool install -g RoslynMcp --version 2.2.0 --add-source /tmp/roslynmcp    # puts `roslyn-mcp` on PATH
 ```
 
 Pin `--version` to the release you downloaded: `dotnet tool install` still consults
