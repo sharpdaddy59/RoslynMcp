@@ -34,6 +34,9 @@ dead-member detection — through a shared compile-before-write safety check. Re
 | `apply_code_fix` (v2.2) | Apply a Roslyn code fix (unused usings, missing using) across file/project/solution, compile-gated |
 | `move_type_to_namespace` (v2.2) | Move a type to another namespace: all partial parts, every reference, usings added |
 | `rename_namespace` (v2.2) | Rename a namespace and its children across the solution; merge only when asked |
+| `implement_interface` (v2.2) | Generate the missing interface member stubs on a type, doc comments copied |
+| `implement_abstract` (v2.2) | Generate overrides for the abstract members a type still lacks |
+| `generate_overrides` (v2.2) | Override chosen virtual members with base-calling stubs; refuses to blanket-override |
 
 Positions are 1-based line/column. Out-of-range columns clamp to the line's end, because
 agents give sloppy coordinates. All errors return as structured JSON (`{"error": ...}`),
@@ -586,3 +589,100 @@ The tool refuses in these cases:
 Comments and string literals are never touched, and usings that a merge makes identical
 are collapsed. Files and folders are not renamed. The result is compiled before
 anything is written.
+
+### `implement_interface`
+
+Generates stubs for every interface member a class or struct does not implement yet, for the
+interfaces in its base list (or only `interfaceName`), including members inherited from base
+interfaces. Members already satisfied, including by a base class, are left alone and listed.
+Stubs throw `NotImplementedException`, carry the interface member's XML doc comment (or
+`/// <inheritdoc />`), and are appended to the type's first declaration (for a partial type the
+result names the file). Only the inserted members are simplified and formatted; the rest of
+the file is untouched. `using System;` is added only if `NotImplementedException` does not
+already resolve (implicit usings count). Compile-gated like every write tool.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `filePath` + `line` + `column` | | the type, or any member of it |
+| `fullyQualifiedName` | | instead of a position, e.g. `MyLib.MemoryRepository` |
+| `interfaceName` | all | `IRepository`, `IRepository<string>` or fully-qualified |
+| `explicitly` | false | emit explicit interface implementations |
+| `dryRun` | false | compute + gate, report the exact changes, write nothing |
+
+Returns `type, interfaces, alreadyImplemented, generated, insertedInto, partialDeclarationFiles,
+addedUsingSystem, applied, dryRun, wouldApply, changedFileCount, changes, conflicts, staleFile,
+message`. If nothing is missing it returns `applied: false` with "Nothing to generate".
+
+```jsonc
+// implement_interface { "fullyQualifiedName": "GenerationLib.MemoryRepository", "dryRun": true }
+{ "type": { "name": "MemoryRepository", "kind": "NamedType", "display": "GenerationLib.MemoryRepository" },
+  "interfaces": ["GenerationLib.IRepository<string>", "GenerationLib.IReadOnlyRepo<string>"],
+  "alreadyImplemented": ["GenerationLib.IRepository<string>.Name", "GenerationLib.IRepository<string>.Add(string)"],
+  "generated": ["GenerationLib.IRepository<string>.Find(string)", "GenerationLib.IRepository<string>.Current",
+                "GenerationLib.IRepository<string>.Changed", "GenerationLib.IRepository<string>.this[int]",
+                "GenerationLib.IReadOnlyRepo<string>.Count"],
+  "insertedInto": ".../GenerationLib/Contracts.cs",
+  "applied": false, "dryRun": true, "wouldApply": true, "changedFileCount": 1,
+  "changes": [{ "file": ".../Contracts.cs", "edits": [{ "line": 37, "oldText": "",
+    "newText": "\n    /// <summary>Finds the item stored under <paramref name=\"key\"/>.</summary>\n    /// <param name=\"key\">The lookup key.</param>\n    public string? Find(string key)\n    {\n        throw new NotImplementedException();\n    }\n ..." }] }],
+  "message": "Dry run: the edit would be applied; 1 file(s) would change. Nothing was written." }
+```
+
+### `implement_abstract`
+
+Generates `override` stubs for every abstract member inherited from the base-class chain that
+the class does not override yet. Stubs keep the base member's accessibility, throw
+`NotImplementedException`, and carry the abstract member's XML doc comment (or
+`/// <inheritdoc />`). Works on an abstract class too. Refuses, writing nothing, if the class
+has no abstract base; returns "Nothing to generate" if everything is already overridden.
+Parameters: the type (`filePath` + `line` + `column`, or `fullyQualifiedName`) and `dryRun`.
+Returns `type, abstractBases, generated, insertedInto, applied, dryRun, wouldApply,
+changedFileCount, changes, conflicts, staleFile, message`.
+
+```csharp
+// implement_abstract { "fullyQualifiedName": "GenerationLib.Circle2" } appends to Circle2:
+    /// <summary>Length of the outline.</summary>
+    public override double Perimeter
+    {
+        get
+        {
+            throw new NotImplementedException();
+        }
+    }
+```
+
+### `generate_overrides`
+
+Generates `override` members for virtual (non-abstract, non-sealed, not yet overridden)
+members of the base chain, including `object`'s `Equals`, `GetHashCode` and `ToString`.
+Bodies call the base member, so behaviour is unchanged until you edit them. Pass `members`
+(names; every overload of a name is generated). Without `members` it **refuses** and lists the
+`candidates`, unless `all: true`, so an agent never blanket-overrides `object` by accident.
+Doc comments are copied as above.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `filePath` + `line` + `column` / `fullyQualifiedName` | | the type |
+| `members` | | names to override, e.g. `["ToString"]` |
+| `all` | false | override every candidate when `members` is not given |
+| `dryRun` | false | compute + gate, report the exact changes, write nothing |
+
+Returns `candidates` on refusal; `generated, insertedInto, applied, dryRun, wouldApply,
+changedFileCount, changes, conflicts, staleFile, message` on success.
+
+```jsonc
+// generate_overrides { "fullyQualifiedName": "GenerationLib.Circle2" }
+{ "type": { "name": "Circle2", ... },
+  "candidates": ["GenerationLib.Shape2.Describe()", "object.Equals(object?)", "object.GetHashCode()", "object.ToString()"],
+  "applied": false, "changedFileCount": 0, "changes": [],
+  "message": "Not applied: pass members (names from candidates) or all: true. Refusing to override all 4 virtual member(s) by default. Nothing was written." }
+```
+
+```csharp
+// generate_overrides { "fullyQualifiedName": "GenerationLib.Circle2", "members": ["ToString"] }
+    /// <inheritdoc />
+    public override string? ToString()
+    {
+        return base.ToString();
+    }
+```

@@ -65,7 +65,7 @@ merged by the orchestrator. Bump to 2.2.0 at the end.
       must survive; a partial type across two files must move whole.
 
 ### E. Generation after extraction  (write)
-- [ ] `implement_interface(type, interface?)`, `implement_abstract(type)`,
+- [x] `implement_interface(type, interface?)`, `implement_abstract(type)`,
       `generate_overrides(type, members?)` via SyntaxGenerator; stubs throw
       NotImplementedException; XML docs copied from the contract.
 
