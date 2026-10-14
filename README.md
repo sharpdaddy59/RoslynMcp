@@ -37,6 +37,9 @@ dead-member detection — through a shared compile-before-write safety check. Re
 | `implement_interface` (v2.2) | Generate the missing interface member stubs on a type, doc comments copied |
 | `implement_abstract` (v2.2) | Generate overrides for the abstract members a type still lacks |
 | `generate_overrides` (v2.2) | Override chosen virtual members with base-calling stubs; refuses to blanket-override |
+| `get_symbol_info` (v2.2) | One symbol in full: kind, modifiers, bases, interfaces, overrides, declarations, doc comment |
+| `get_type_hierarchy` (v2.2) | Bases up to object, derived types and implementations down, with files |
+| `find_unused_parameters` (v2.2) | Parameters never read or written, with find_unused_members' confidence tiers and explicit exclusions |
 
 Positions are 1-based line/column. Out-of-range columns clamp to the line's end, because
 agents give sloppy coordinates. All errors return as structured JSON (`{"error": ...}`),
@@ -686,3 +689,44 @@ changedFileCount, changes, conflicts, staleFile, message` on success.
         return base.ToString();
     }
 ```
+
+### `get_symbol_info` (read-only)
+
+Everything the compiler knows about one symbol, by position or fully-qualified name
+(metadata symbols such as `System.String` work too): `kind` (class, record, struct,
+interface, enum, delegate, method, constructor, local function, property, indexer,
+field, const, event, parameter, local, namespace, ...), `accessibility`, `modifiers`
+(only the ones that apply, in C# declaration order), `containingType`,
+`containingNamespace`, `returnType` or `type`, `parameters` (name, type, default,
+modifier), `typeParameters` with constraints, `baseType` and every interface (types),
+`overrides` and `implements` (members), `declarations` (one per declaring location, so
+partials give several; empty for metadata), `isFromMetadata`, the raw XML `docComment`,
+and `attributes`. Everything is sorted, so the output is stable from run to run.
+
+### `get_type_hierarchy` (read-only)
+
+For a named type: `bases` walking up (a class ends with `System.Object`; an interface
+lists its base interfaces), `interfaces` (all of them, flattened and sorted), and
+`derived` walking down through the loaded solution: derived classes, derived interfaces
+and implementations, transitive, breadth-first, each with `depth`, `relation` and the
+parent it came through (`via`). Every entry carries `file` when it is declared in
+source, or `isFromMetadata: true`. Capped by `maxNodes` (default 200, `truncated: true`
+when hit). Pointing it at a member answers with the containing type's hierarchy and says
+so in `note`.
+
+### `find_unused_parameters` (read-only)
+
+Parameters of source-declared methods, constructors and local functions that the body
+never reads or writes, in the same two honesty tiers as `find_unused_members`:
+**`highConfidence`** (private/internal and not virtual, or a local function, so every
+caller is in the solution) and **`lowConfidence`** (externally visible or virtual, so
+external callers or overriders may depend on the signature). `nameof(p)` and passing `p`
+along both count as uses. Event-handler-shaped methods (`object sender, EventArgs e`)
+are reported with `conventional: true`. Signatures that aren't the method's to change
+are not listed, but `excludedCounts` says how many parameters were skipped and why:
+`override`, `interfaceImplementation`, `noBody` (abstract, extern, partial definition,
+interface member), `usedAsDelegate` (the method is referenced as a method group),
+`entryPoint` (`Main`), `discard` (`_`, `_1`), `extensionThis`, `generatedCode`. Scope
+with `projectName` or `filePath`. Capped by `maxResults` (default 200,
+`truncated: true`). To act on a hit, use `change_signature`, which rewrites every call
+site through the compile gate.

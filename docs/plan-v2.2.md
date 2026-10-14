@@ -70,10 +70,10 @@ merged by the orchestrator. Bump to 2.2.0 at the end.
       NotImplementedException; XML docs copied from the contract.
 
 ### F. Small navigation gaps  (read-only, one hour each)
-- [ ] `get_symbol_info` (kind, accessibility, modifiers, base types, interfaces,
+- [x] `get_symbol_info` (kind, accessibility, modifiers, base types, interfaces,
       declaring files, doc comment).
-- [ ] `get_type_hierarchy` (bases up, derived down, with files).
-- [ ] `find_unused_parameters` (extension of find_unused_members' honesty tiers).
+- [x] `get_type_hierarchy` (bases up, derived down, with files).
+- [x] `find_unused_parameters` (extension of find_unused_members' honesty tiers).
 
 ### G. Claude Code plugin  (distribution; do with or right after A)
 - [x] A plugin in this repo (`plugin/` with `.claude-plugin/plugin.json` and an
