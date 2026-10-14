@@ -41,6 +41,23 @@ v2.1 adds one more read-only tool (`find_callers`) and three more that write
 (`delete_member`, `move_type_to_file`, `change_signature`), all under the same
 compile-before-write contract; see "v2.1" at the end.
 
+## Install as a Claude Code plugin
+
+The quickest way to use RoslynMcp from Claude Code is to run these two commands inside Claude Code:
+
+```
+/plugin marketplace add sharpdaddy59/RoslynMcp
+/plugin install roslyn@roslynmcp
+```
+
+On Claude Code 2.1.275 or later, one command does both steps: `/plugin install roslyn --marketplace sharpdaddy59/RoslynMcp`.
+
+The plugin registers an MCP server named `roslyn`. The first time it starts, its launcher looks for `roslyn-mcp`, checking `PATH` and then `~/.dotnet/tools`. If the tool is missing, the launcher downloads the `.nupkg` from the latest GitHub Release, installs it with `dotnet tool install -g`, and starts it. After that it simply runs the installed tool. The .NET 10 SDK must already be installed. Install progress goes to stderr, which shows in `claude --debug` or the `/mcp` panel. If a slow download makes the first start time out, run `/mcp` to reconnect, because the install will have finished, or start Claude Code once with `MCP_TIMEOUT=60000`.
+
+- **Offline or pinned installs:** set `ROSLYN_MCP_NUPKG_DIR` to a folder that holds `RoslynMcp.*.nupkg`, and the launcher installs from that folder instead of GitHub.
+- **Updating:** the plugin never upgrades an installed tool. To upgrade, use `dotnet tool update` as described under Install below.
+- **Windows:** the launcher is a bash script. It should work when Git for Windows' `bash` is the one on `PATH`. If it is not, run `plugin/scripts/roslyn-mcp.ps1` once in PowerShell to install the tool, or use the manual `.mcp.json` setup below.
+
 ## Install
 
 RoslynMcp ships as a .NET global tool, attached to each
@@ -50,11 +67,13 @@ Needs the .NET 10 SDK, which the server also uses to load your solution through 
 
 ```bash
 gh release download v2.1.0 -R sharpdaddy59/RoslynMcp -p '*.nupkg' -D /tmp/roslynmcp
-dotnet tool install -g RoslynMcp --add-source /tmp/roslynmcp    # puts `roslyn-mcp` on PATH
+dotnet tool install -g RoslynMcp --version 2.1.0 --add-source /tmp/roslynmcp    # puts `roslyn-mcp` on PATH
 ```
 
-To update, download the newer release and run `dotnet tool update -g RoslynMcp
---add-source <that folder>`.
+Pin `--version` to the release you downloaded: `dotnet tool install` still consults
+nuget.org alongside `--add-source`, and the unrelated `RoslynMcp` package there must
+never win. To update, download the newer release and run `dotnet tool update -g RoslynMcp
+--version <new> --add-source <that folder>`.
 
 ## Usage with Claude Code
 
@@ -376,3 +395,40 @@ rejects with CS0103 and nothing is written. `newOrder` reorders declarations and
 positional arguments. A method used as a method group or delegate is refused with
 the locations listed rather than guessed at.
 
+## v2.2: previews, impact, fixes, namespaces, plugin
+
+v2.2 adds a dry-run mode to every write tool and ships RoslynMcp as a Claude Code
+plugin that installs itself on first launch. Every write tool, old and new, still goes
+through the `MutationApplier` contract: staleness check, compile the candidate, compare
+against the load-time baseline, write or report the real diagnostics. Design notes per
+item live in `docs/v2.2-*.md`.
+
+### dryRun on every write tool
+
+Every write tool (`apply_rename`, `extract_interface`, `change_signature`,
+`delete_member`, `move_type_to_file`) accepts `dryRun: true`. A dry run computes the edit
+exactly as the real call would, runs every check (the tool's own refusals, the
+stale-file check, and the compile-before-write gate), and reports the result, but writes
+nothing: no source file, no new file, no project file, and the loaded workspace is left as
+it was. The response has the tool's usual shape plus `dryRun: true` and `wouldApply`:
+when `wouldApply` is true, `changes` is the exact edit list the real call will write; when
+it is false, `conflicts` (or `staleFile`) holds the same compiler errors the real call
+would reject with. Re-run the same call without `dryRun` to apply. `rename_symbol_preview`
+still works, but `apply_rename` with `dryRun: true` is preferred because it also gives the
+compile-gate verdict.
+
+```json
+{
+  "symbol": { "name": "Process", "kind": "Method", "display": "FixtureLib.ProcessorBase.Process(string)", "containingType": "FixtureLib.ProcessorBase" },
+  "newName": "Execute",
+  "applied": false,
+  "dryRun": true,
+  "wouldApply": true,
+  "changedFileCount": 2,
+  "changes": [
+    { "file": "/repo/FixtureLib/Processor.cs", "edits": [ { "line": 13, "oldText": "Process", "newText": "Execute" }, { "line": 21, "oldText": "Process", "newText": "Execute" } ] },
+    { "file": "/repo/FixtureApp/Program.cs", "edits": [ { "line": 7, "oldText": "Process", "newText": "Execute" } ] }
+  ],
+  "message": "Dry run: the edit would be applied; 2 file(s) would change. Nothing was written."
+}
+```
