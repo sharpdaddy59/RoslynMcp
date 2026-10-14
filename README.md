@@ -530,3 +530,52 @@ CS8019). Parameters: `diagnosticId?`, `scope` (`file` | `project` | `solution`, 
 `solution`), `filePath?`, `projectName?`, `includeHidden` (default true). Ordering is
 deterministic (ids ordinal; locations by file, then position). Analyzer-only IDE diagnostics
 are not computed, and files under `bin/` and `obj/` are excluded.
+
+### `move_type_to_namespace`
+
+Moves one top-level type to another namespace across the whole solution. Every
+declaration moves, including all partial parts across files, and every reference keeps
+resolving:
+- Fully-qualified references, qualified crefs, `using static` and alias targets are
+  re-qualified from `Old.Ns.Type` to `New.Ns.Type`.
+- Files that use the type by simple name get `using New.Ns;` if the namespace is not
+  already in scope. This includes code that stays behind in the old namespace.
+
+How each declaration moves:
+- **The namespace declaration holds only this type:** the declaration is renamed. This
+  works for file-scoped and block namespaces.
+- **Other types share a block namespace:** the type, with its doc comments and
+  attributes, moves into a new `namespace New.Ns { }` block at the end of the same file.
+- **Other types share a file-scoped namespace:** C# allows only one namespace in that
+  file, so the type moves to a new `<TypeName>.cs` next to it.
+
+Names the moved type relied on from its old namespace get a `using`. If a type with the
+same name in the new namespace would capture the simple name, the name is fully
+qualified instead.
+
+The tool refuses nested types, metadata types, a move to the namespace the type is
+already in, and a target namespace that already holds a type of the same name. Comments
+and string literals are never touched. `declarations` reports the mechanics used for
+each file. As with every write tool, the result is compiled first and nothing is written
+if it wouldn't build.
+
+### `rename_namespace`
+
+Renames a namespace across the whole solution. This covers every declaration (block and
+file-scoped, in every project) and every `using`, `using static`, alias target,
+qualified name and cref. Child namespaces move with it, so `A.B` → `A.C` also renames
+`A.B.D` → `A.C.D`.
+
+Renames that change only the last segment under the same parent use Roslyn's
+`Renamer`. Anything else, such as `A.B` → `A.X.Y` or a merge into a parent, uses a
+symbol-driven syntax pass. The result reports which path was used as `mechanics`.
+
+The tool refuses in these cases:
+- The new namespace already exists, in source or in a referenced assembly. The message
+  names where. Pass `merge: true` to combine the two namespaces deliberately.
+- A merge would put two types with the same name into one namespace.
+- The old namespace has no declarations in source (for example `System.Text`).
+
+Comments and string literals are never touched, and usings that a merge makes identical
+are collapsed. Files and folders are not renamed. The result is compiled before
+anything is written.
