@@ -13,3 +13,6 @@ artifacts/
 
 # The Claude Code plugin ships its MCP server declaration
 !plugin/.mcp.json
+
+# Claude Code worktrees for parallel builders
+.claude/worktrees/
