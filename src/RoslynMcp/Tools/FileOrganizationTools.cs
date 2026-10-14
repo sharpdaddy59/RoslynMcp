@@ -18,7 +18,8 @@ public static class FileOrganizationTools
         [Description("1-based line number on the type's declaration or any member of it (use with filePath)")] int? line = null,
         [Description("1-based column (use with filePath)")] int? column = null,
         [Description("Fully-qualified metadata name of the type instead of a position, e.g. 'FixtureLib.Square' or 'MyNs.Box`1'")] string? fullyQualifiedName = null,
-        [Description("Optional file name for the new file, e.g. 'Square.cs' (default <TypeName>.cs, generic arity omitted). A bare file name only: the file is always created in the source file's directory.")] string? destinationFileName = null)
+        [Description("Optional file name for the new file, e.g. 'Square.cs' (default <TypeName>.cs, generic arity omitted). A bare file name only: the file is always created in the source file's directory.")] string? destinationFileName = null,
+        [Description("Preview only: run every check and the compile gate, report the exact changes/conflicts the real call would produce, but write nothing (default false).")] bool dryRun = false)
     {
         return ToolJson.GuardAsync(async () =>
         {
@@ -91,10 +92,10 @@ public static class FileOrganizationTools
                     destinationPath);
 
             var sourceChanges = await RefactorTools.DescribeDocumentChangesAsync(solution, candidateSolution, maxDocuments: 10);
-            var result = await MutationApplier.TryApplyAsync(candidateSolution);
+            var result = await MutationApplier.ApplyOrPreviewAsync(candidateSolution, dryRun);
 
             var changes = new List<object>();
-            if (result.Applied)
+            if (result.Accepted)
             {
                 changes.AddRange(sourceChanges);
                 changes.Add(new
@@ -111,10 +112,12 @@ public static class FileOrganizationTools
                 sourceFile = sourcePath,
                 destinationFile = destinationPath,
                 applied = result.Applied,
+                dryRun = RefactorTools.DryRunFlag(dryRun),
+                wouldApply = RefactorTools.WouldApplyFlag(dryRun, result),
                 remainingTypesInSource = remainingTypes,
-                changedFileCount = result.Applied ? changes.Count : 0,
+                changedFileCount = result.Accepted ? changes.Count : 0,
                 changes,
-                conflicts = result.Applied || result.NewErrors.Count == 0 ? null : result.NewErrors,
+                conflicts = result.Accepted || result.NewErrors.Count == 0 ? null : result.NewErrors,
                 staleFile = result.StaleFile,
                 message = result.Message
             };

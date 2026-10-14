@@ -20,16 +20,31 @@ public sealed record MutationDiagnostic(string Id, string Message, string? File,
     }
 }
 
-/// <summary>Outcome of a mutation attempt. Exactly one of the failure reasons is set when Applied is false.</summary>
+/// <summary>
+/// Outcome of a mutation attempt. Exactly one of the failure reasons is set when the edit was
+/// (or, for a dry run, would be) rejected. A dry run (<see cref="MutationApplier.PreviewAsync"/>)
+/// never writes: Applied is always false, DryRun is true, and WouldApply says whether the real
+/// call would have written; ChangedFiles then lists the files that WOULD change.
+/// </summary>
 public sealed record MutationResult(
     bool Applied,
     IReadOnlyList<string> ChangedFiles,
     IReadOnlyList<MutationDiagnostic> NewErrors,
     string? StaleFile,
-    string? Message)
+    string? Message,
+    bool DryRun = false,
+    bool WouldApply = false)
 {
+    /// <summary>True if the edit was applied, or (dry run) would be applied.</summary>
+    public bool Accepted => Applied || WouldApply;
+
     internal static MutationResult Success(IReadOnlyList<string> changedFiles) =>
         new(true, changedFiles, [], null, null);
+
+    internal static MutationResult WouldSucceed(IReadOnlyList<string> changedFiles) =>
+        new(false, changedFiles, [], null,
+            $"Dry run: the edit would be applied; {changedFiles.Count} file(s) would change. Nothing was written.",
+            DryRun: true, WouldApply: true);
 
     internal static MutationResult RejectedNewErrors(IReadOnlyList<MutationDiagnostic> errors) =>
         new(false, [], errors,
@@ -58,61 +73,40 @@ public sealed record MutationResult(
 /// </summary>
 public static class MutationApplier
 {
+    /// <summary>Applies the candidate (dryRun false) or only previews it (dryRun true).</summary>
+    public static Task<MutationResult> ApplyOrPreviewAsync(
+        Solution candidateSolution, bool dryRun, CancellationToken cancellationToken = default) =>
+        dryRun
+            ? PreviewAsync(candidateSolution, cancellationToken)
+            : TryApplyAsync(candidateSolution, cancellationToken);
+
+    /// <summary>
+    /// Dry run: runs exactly the checks TryApplyAsync runs (staleness of every touched file,
+    /// compile gate against the load-time baseline) and reports what it would do, but never
+    /// calls Workspace.TryApplyChanges and never touches the disk or WorkspaceHost.Current.
+    /// A rejection carries the same NewErrors / StaleFile / Message the real call would return.
+    /// </summary>
+    public static async Task<MutationResult> PreviewAsync(
+        Solution candidateSolution, CancellationToken cancellationToken = default)
+    {
+        var validation = await ValidateAsync(WorkspaceHost.Current, candidateSolution, cancellationToken);
+        return validation.Rejection is { } rejection
+            ? rejection with { DryRun = true, WouldApply = false }
+            : MutationResult.WouldSucceed(validation.ChangedFilePaths);
+    }
+
     public static async Task<MutationResult> TryApplyAsync(
         Solution candidateSolution, CancellationToken cancellationToken = default)
     {
         var baseSolution = WorkspaceHost.Current;
-        var projectChanges = candidateSolution.GetChanges(baseSolution).GetProjectChanges().ToList();
-
-        var touchedDocumentIds = projectChanges
-            .SelectMany(pc => pc.GetChangedDocuments().Concat(pc.GetRemovedDocuments()))
-            .ToList();
-
-        foreach (var documentId in touchedDocumentIds)
+        var validation = await ValidateAsync(baseSolution, candidateSolution, cancellationToken);
+        if (validation.Rejection is { } rejection)
         {
-            var filePath = baseSolution.GetDocument(documentId)?.FilePath;
-            if (filePath is not null && WorkspaceHost.HasChangedOnDiskSinceSnapshot(filePath))
-            {
-                return MutationResult.Stale(filePath);
-            }
+            return rejection;
         }
 
-        var changedProjectIds = projectChanges.Select(pc => pc.ProjectId).ToHashSet();
-        var dependencyGraph = candidateSolution.GetProjectDependencyGraph();
-        var affectedProjectIds = changedProjectIds
-            .SelectMany(id => dependencyGraph.GetProjectsThatTransitivelyDependOnThisProject(id).Append(id))
-            .ToHashSet();
-
-        var newErrors = new List<MutationDiagnostic>();
-        foreach (var projectId in affectedProjectIds)
-        {
-            var project = candidateSolution.GetProject(projectId);
-            if (project is null) continue;
-
-            var compilation = await project.GetCompilationAsync(cancellationToken);
-            if (compilation is null) continue;
-
-            var baselineErrors = WorkspaceHost.GetBaselineErrors(projectId);
-            var candidateErrors = compilation.GetDiagnostics(cancellationToken)
-                .Where(d => d.Severity == DiagnosticSeverity.Error);
-
-            newErrors.AddRange(candidateErrors
-                .Where(d => !baselineErrors.Contains(WorkspaceHost.DiagnosticKey(d)))
-                .Select(MutationDiagnostic.FromDiagnostic));
-        }
-
-        if (newErrors.Count > 0)
-        {
-            return MutationResult.RejectedNewErrors(newErrors);
-        }
-
-        var changedFilePaths = touchedDocumentIds
-            .Select(id => baseSolution.GetDocument(id)?.FilePath)
-            .Concat(projectChanges.SelectMany(pc => pc.GetAddedDocuments())
-                .Select(id => candidateSolution.GetDocument(id)?.FilePath))
-            .OfType<string>()
-            .Distinct()
-            .ToList();
+        var projectChanges = validation.ProjectChanges;
+        var changedFilePaths = validation.ChangedFilePaths;
 
         // Workspace.TryApplyChanges rewrites the project file of any project gaining a document
         // (and MSBuild's save drops its final newline); snapshot the bytes so a net-zero rewrite
@@ -155,6 +149,74 @@ public static class MutationApplier
         }
 
         return MutationResult.Success(changedFilePaths);
+    }
+
+    private sealed record Validation(
+        IReadOnlyList<ProjectChanges> ProjectChanges,
+        IReadOnlyList<string> ChangedFilePaths,
+        MutationResult? Rejection);
+
+    /// <summary>
+    /// The shared, side-effect-free stage of every mutation: refuses if a touched file changed
+    /// on disk since load, compiles every affected project of the candidate and rejects on any
+    /// error not in the load-time baseline, and otherwise computes the files that would change.
+    /// </summary>
+    private static async Task<Validation> ValidateAsync(
+        Solution baseSolution, Solution candidateSolution, CancellationToken cancellationToken)
+    {
+        var projectChanges = candidateSolution.GetChanges(baseSolution).GetProjectChanges().ToList();
+
+        var touchedDocumentIds = projectChanges
+            .SelectMany(pc => pc.GetChangedDocuments().Concat(pc.GetRemovedDocuments()))
+            .ToList();
+
+        foreach (var documentId in touchedDocumentIds)
+        {
+            var filePath = baseSolution.GetDocument(documentId)?.FilePath;
+            if (filePath is not null && WorkspaceHost.HasChangedOnDiskSinceSnapshot(filePath))
+            {
+                return new Validation(projectChanges, [], MutationResult.Stale(filePath));
+            }
+        }
+
+        var changedProjectIds = projectChanges.Select(pc => pc.ProjectId).ToHashSet();
+        var dependencyGraph = candidateSolution.GetProjectDependencyGraph();
+        var affectedProjectIds = changedProjectIds
+            .SelectMany(id => dependencyGraph.GetProjectsThatTransitivelyDependOnThisProject(id).Append(id))
+            .ToHashSet();
+
+        var newErrors = new List<MutationDiagnostic>();
+        foreach (var projectId in affectedProjectIds)
+        {
+            var project = candidateSolution.GetProject(projectId);
+            if (project is null) continue;
+
+            var compilation = await project.GetCompilationAsync(cancellationToken);
+            if (compilation is null) continue;
+
+            var baselineErrors = WorkspaceHost.GetBaselineErrors(projectId);
+            var candidateErrors = compilation.GetDiagnostics(cancellationToken)
+                .Where(d => d.Severity == DiagnosticSeverity.Error);
+
+            newErrors.AddRange(candidateErrors
+                .Where(d => !baselineErrors.Contains(WorkspaceHost.DiagnosticKey(d)))
+                .Select(MutationDiagnostic.FromDiagnostic));
+        }
+
+        if (newErrors.Count > 0)
+        {
+            return new Validation(projectChanges, [], MutationResult.RejectedNewErrors(newErrors));
+        }
+
+        var changedFilePaths = touchedDocumentIds
+            .Select(id => baseSolution.GetDocument(id)?.FilePath)
+            .Concat(projectChanges.SelectMany(pc => pc.GetAddedDocuments())
+                .Select(id => candidateSolution.GetDocument(id)?.FilePath))
+            .OfType<string>()
+            .Distinct()
+            .ToList();
+
+        return new Validation(projectChanges, changedFilePaths, null);
     }
 
     /// <summary>

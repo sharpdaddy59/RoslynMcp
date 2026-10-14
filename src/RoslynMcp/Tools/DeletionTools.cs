@@ -26,7 +26,8 @@ public static class DeletionTools
         [Description("1-based line number of the symbol (use with filePath)")] int? line = null,
         [Description("1-based column of the symbol (use with filePath)")] int? column = null,
         [Description("Fully-qualified metadata name instead of a position, e.g. 'FixtureLib.Removable.DeadHelper' or 'FixtureLib.Removable'")] string? fullyQualifiedName = null,
-        [Description("Delete even if references remain or a contract would break (default false). Only pass true if you will fix the reported sites; the compile gate still refuses an edit that introduces errors.")] bool force = false)
+        [Description("Delete even if references remain or a contract would break (default false). Only pass true if you will fix the reported sites; the compile gate still refuses an edit that introduces errors.")] bool force = false,
+        [Description("Preview only: run every check and the compile gate, report the exact changes/conflicts the real call would produce, but write nothing (default false).")] bool dryRun = false)
     {
         return ToolJson.GuardAsync(async () =>
         {
@@ -65,6 +66,8 @@ public static class DeletionTools
                     symbol = NavigationTools.Describe(symbol),
                     kind = KindOf(symbol),
                     applied = false,
+                    dryRun = RefactorTools.DryRunFlag(dryRun),
+                    wouldApply = dryRun ? false : (bool?)null,
                     referenceCount = references.Count,
                     references = referenceList.Count > 0 ? referenceList.Select(r => r.ToJson()).ToList() : null,
                     truncated,
@@ -101,7 +104,7 @@ public static class DeletionTools
             }
 
             var changes = await RefactorTools.DescribeDocumentChangesAsync(solution, candidate, MaxChangedDocuments);
-            var result = await MutationApplier.TryApplyAsync(candidate);
+            var result = await MutationApplier.ApplyOrPreviewAsync(candidate, dryRun);
 
             string? message = result.Message;
             if (result.Applied)
@@ -109,6 +112,10 @@ public static class DeletionTools
                 message = fileNowEmpty == true
                     ? "Deleted. The file no longer declares any type; it was left in place (delete it yourself if it is no longer needed)."
                     : null;
+            }
+            else if (result.WouldApply && fileNowEmpty == true)
+            {
+                message += " The file would no longer declare any type; it would be left in place.";
             }
             else if (result.NewErrors.Count > 0)
             {
@@ -120,14 +127,16 @@ public static class DeletionTools
                 symbol = NavigationTools.Describe(symbol),
                 kind = KindOf(symbol),
                 applied = result.Applied,
-                fileNowEmpty = result.Applied ? fileNowEmpty : null,
+                dryRun = RefactorTools.DryRunFlag(dryRun),
+                wouldApply = RefactorTools.WouldApplyFlag(dryRun, result),
+                fileNowEmpty = result.Accepted ? fileNowEmpty : null,
                 referenceCount = references.Count > 0 ? (int?)references.Count : null,
                 references = referenceList.Count > 0 ? referenceList.Select(r => r.ToJson()).ToList() : null,
                 truncated,
                 contracts = contracts.Count > 0 ? contracts : null,
-                changedFileCount = result.Applied ? changes.Count : 0,
-                changes = result.Applied ? changes : [],
-                conflicts = result.Applied || result.NewErrors.Count == 0 ? null : result.NewErrors,
+                changedFileCount = result.Accepted ? changes.Count : 0,
+                changes = result.Accepted ? changes : [],
+                conflicts = result.Accepted || result.NewErrors.Count == 0 ? null : result.NewErrors,
                 staleFile = result.StaleFile,
                 message,
                 note

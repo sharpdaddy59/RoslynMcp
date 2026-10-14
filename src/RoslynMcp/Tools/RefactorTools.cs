@@ -12,7 +12,7 @@ public static class RefactorTools
     private const int MaxChangedDocuments = 100;
 
     [McpServerTool]
-    [Description("PREVIEW a solution-wide rename of the symbol at a position: shows every file and line that would change, without modifying anything. Apply the changes with your file-editing tools if the preview looks right.")]
+    [Description("PREVIEW a solution-wide rename of the symbol at a position: shows every file and line that would change, without modifying anything. Kept for back-compat: prefer apply_rename with dryRun: true, which shows the same changes AND the compile-gate verdict (wouldApply, conflicts), and can then be re-run without dryRun to write.")]
     public static Task<string> RenameSymbolPreview(
         [Description("Absolute path of the file containing the symbol")] string filePath,
         [Description("1-based line number of the symbol")] int line,
@@ -49,7 +49,8 @@ public static class RefactorTools
         [Description("1-based column of the symbol (use with filePath)")] int? column = null,
         [Description("Fully-qualified metadata name of the symbol instead of a position, e.g. 'FixtureLib.ProcessorBase.Process(string)' or 'FixtureLib.Greeter'")] string? fullyQualifiedName = null,
         [Description("Also rename occurrences inside string literals (default false)")] bool renameInStrings = false,
-        [Description("Also rename occurrences inside comments (default false)")] bool renameInComments = false)
+        [Description("Also rename occurrences inside comments (default false)")] bool renameInComments = false,
+        [Description("Preview only: run every check and the compile gate, report the exact changes/conflicts the real call would produce, but write nothing (default false).")] bool dryRun = false)
     {
         return ToolJson.GuardAsync(async () =>
         {
@@ -67,21 +68,29 @@ public static class RefactorTools
             var candidateSolution = await Renamer.RenameSymbolAsync(solution, symbol, options, newName);
 
             var changes = await DescribeDocumentChangesAsync(solution, candidateSolution, MaxChangedDocuments);
-            var result = await MutationApplier.TryApplyAsync(candidateSolution);
+            var result = await MutationApplier.ApplyOrPreviewAsync(candidateSolution, dryRun);
 
             return new
             {
                 symbol = NavigationTools.Describe(symbol),
                 newName,
                 applied = result.Applied,
-                changedFileCount = result.Applied ? changes.Count : 0,
-                changes = result.Applied ? changes : [],
-                conflicts = result.Applied || result.NewErrors.Count == 0 ? null : result.NewErrors,
+                dryRun = DryRunFlag(dryRun),
+                wouldApply = WouldApplyFlag(dryRun, result),
+                changedFileCount = result.Accepted ? changes.Count : 0,
+                changes = result.Accepted ? changes : [],
+                conflicts = result.Accepted || result.NewErrors.Count == 0 ? null : result.NewErrors,
                 staleFile = result.StaleFile,
                 message = result.Message
             };
         });
     }
+
+    /// <summary>JSON value for a write tool's "dryRun" field: true for a dry run, omitted otherwise.</summary>
+    internal static bool? DryRunFlag(bool dryRun) => dryRun ? true : null;
+
+    /// <summary>JSON value for a write tool's "wouldApply" field: the gate verdict for a dry run, omitted otherwise.</summary>
+    internal static bool? WouldApplyFlag(bool dryRun, MutationResult result) => dryRun ? result.WouldApply : null;
 
     internal static async Task<List<object>> DescribeDocumentChangesAsync(
         Solution before, Solution after, int maxDocuments)

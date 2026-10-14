@@ -47,7 +47,8 @@ public static class SignatureTools
         [Description("Fully-qualified metadata name of the method instead of a position, e.g. 'FixtureLib.Shipper.Quote' or, to pick an overload, 'FixtureLib.Shipper.Quote(string, int)' (parameter types as C# display names)")] string? fullyQualifiedName = null,
         [Description("Parameters to add: [{ name, type, defaultValue?, callSiteValue?, index? }]. Each needs callSiteValue (inserted at every call site) and/or defaultValue (call sites untouched).")] AddParameterSpec[]? addParameters = null,
         [Description("Names of parameters (as declared on the targeted method) to remove from every declaration and every call site")] string[]? removeParameters = null,
-        [Description("Optional: the complete parameter name list in the desired final order - must be a permutation of the parameters left after removals plus additions")] string[]? newOrder = null)
+        [Description("Optional: the complete parameter name list in the desired final order - must be a permutation of the parameters left after removals plus additions")] string[]? newOrder = null,
+        [Description("Preview only: run every check and the compile gate, report the exact changes/conflicts the real call would produce, but write nothing (default false).")] bool dryRun = false)
     {
         return ToolJson.GuardAsync(async () =>
         {
@@ -203,6 +204,8 @@ public static class SignatureTools
                     cascade = cascadeNames,
                     operations,
                     applied = false,
+                    dryRun = RefactorTools.DryRunFlag(dryRun),
+                    wouldApply = dryRun ? false : (bool?)null,
                     changedFileCount = 0,
                     changes = Array.Empty<object>(),
                     unsupportedUsages = unsupported,
@@ -222,7 +225,7 @@ public static class SignatureTools
             }
 
             var changes = await RefactorTools.DescribeDocumentChangesAsync(solution, candidateSolution, MaxChangedDocuments);
-            var result = await MutationApplier.TryApplyAsync(candidateSolution);
+            var result = await MutationApplier.ApplyOrPreviewAsync(candidateSolution, dryRun);
 
             return new
             {
@@ -231,9 +234,11 @@ public static class SignatureTools
                 operations,
                 callSiteCount,
                 applied = result.Applied,
-                changedFileCount = result.Applied ? changes.Count : 0,
-                changes = result.Applied ? changes : [],
-                conflicts = result.Applied || result.NewErrors.Count == 0 ? null : result.NewErrors,
+                dryRun = RefactorTools.DryRunFlag(dryRun),
+                wouldApply = RefactorTools.WouldApplyFlag(dryRun, result),
+                changedFileCount = result.Accepted ? changes.Count : 0,
+                changes = result.Accepted ? changes : [],
+                conflicts = result.Accepted || result.NewErrors.Count == 0 ? null : result.NewErrors,
                 staleFile = result.StaleFile,
                 message = result.Message
             };
