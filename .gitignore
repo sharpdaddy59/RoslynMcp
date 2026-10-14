@@ -10,3 +10,6 @@ sharpcoder.db
 prompts/
 plan-v2.json
 artifacts/
+
+# The Claude Code plugin ships its MCP server declaration
+!plugin/.mcp.json
