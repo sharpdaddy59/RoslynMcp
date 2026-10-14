@@ -124,7 +124,7 @@ public static class FileOrganizationTools
         });
     }
 
-    private static async Task<(INamedTypeSymbol Symbol, MemberDeclarationSyntax Syntax)> ResolveTypeAsync(
+    internal static async Task<(INamedTypeSymbol Symbol, MemberDeclarationSyntax Syntax)> ResolveTypeAsync(
         Solution solution, string? filePath, int? line, int? column, string? fullyQualifiedName)
     {
         if (!string.IsNullOrEmpty(fullyQualifiedName))
@@ -195,7 +195,7 @@ public static class FileOrganizationTools
         string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
             OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    private static string DetectNewline(string text) => text.Contains("\r\n") ? "\r\n" : "\n";
+    internal static string DetectNewline(string text) => text.Contains("\r\n") ? "\r\n" : "\n";
 
     /// <summary>
     /// Builds the new file's text: extern aliases + non-global usings of the compilation unit
@@ -259,7 +259,7 @@ public static class FileOrganizationTools
         text.EndsWith('\n') ? text : text + newline;
 
     /// <summary>Drops leading blank lines (but keeps the indentation of the first real line).</summary>
-    private static SyntaxTriviaList TrimLeadingBlankLines(SyntaxTriviaList trivia)
+    internal static SyntaxTriviaList TrimLeadingBlankLines(SyntaxTriviaList trivia)
     {
         var lastEolBeforeContent = -1;
         for (var i = 0; i < trivia.Count; i++)
@@ -287,7 +287,7 @@ public static class FileOrganizationTools
     /// separated it from the previous member goes with it), then collapses any run of blank
     /// lines left at the splice point down to a single blank line.
     /// </summary>
-    private static SourceText RemoveDeclaration(SourceText text, MemberDeclarationSyntax declaration)
+    internal static SourceText RemoveDeclaration(SourceText text, MemberDeclarationSyntax declaration)
     {
         var span = declaration.FullSpan;
         var full = text.ToString();
