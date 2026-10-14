@@ -104,4 +104,4 @@ present) but adds ~4.4 MB to the nupkg; D moves a type out of a shared file-scop
 namespace into its own file (C# forbids mixing block and file-scoped namespaces).
 Found and fixed along the way: the compile gate's rejected-diagnostics list was
 unordered, so a dry run and its real call could disagree on order; it is now sorted.
-Test count 55 -> 107. Not tagged; the release is Wily's call.
+Test count 55 -> 116. Not tagged; the release is Wily's call.
