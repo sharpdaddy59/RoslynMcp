@@ -1,0 +1,18 @@
+{
+  "name": "roslynmcp",
+  "description": "RoslynMcp: Roslyn-backed C# code intelligence and refactoring for Claude Code.",
+  "owner": {
+    "name": "Greg Haley",
+    "url": "https://github.com/sharpdaddy59"
+  },
+  "plugins": [
+    {
+      "name": "roslyn",
+      "source": "./plugin",
+      "description": "Semantic C# navigation, diagnostics, and refactoring via the roslyn-mcp MCP server; installs the .NET tool on first launch.",
+      "version": "2.2.0",
+      "category": "development",
+      "tags": ["csharp", "dotnet", "roslyn", "mcp"]
+    }
+  ]
+}

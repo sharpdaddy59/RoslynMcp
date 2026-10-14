@@ -1,0 +1,14 @@
+{
+  "name": "roslyn",
+  "displayName": "RoslynMcp",
+  "version": "2.2.0",
+  "description": "Semantic C# tools for Claude Code, powered by Roslyn: find-references, go-to-definition, implementations, diagnostics, and solution-wide edits with a compile-before-write check. Installs the roslyn-mcp .NET tool from the latest GitHub Release on first launch.",
+  "author": {
+    "name": "Greg Haley",
+    "url": "https://github.com/sharpdaddy59"
+  },
+  "homepage": "https://github.com/sharpdaddy59/RoslynMcp",
+  "repository": "https://github.com/sharpdaddy59/RoslynMcp",
+  "license": "MIT",
+  "keywords": ["csharp", "dotnet", "roslyn", "refactoring", "code-intelligence", "mcp"]
+}
