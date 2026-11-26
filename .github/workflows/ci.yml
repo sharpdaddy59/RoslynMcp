@@ -23,8 +23,17 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      # FixtureSolutionTests run against the in-repo fixtures/FixtureSolution
-      # (self-restoring). SharpCoderSolutionTests skip visibly here - they need
-      # the sibling SharpCoder checkout and run locally.
+      # Restore the fixture solutions here, in a clean shell, rather than from inside the
+      # test process: a `dotnet restore` spawned by the tests inherits MSBuildLocator's
+      # MSBuild variables, and an ImpactSolution restore failed that way on CI (2026-11-26).
+      # One retry absorbs a nuget.org blip. The tests' own EnsureRestored then skips.
+      - name: Restore test fixtures
+        run: |
+          for sln in fixtures/*/*.slnx; do
+            dotnet restore "$sln" || { echo "retrying $sln"; sleep 15; dotnet restore "$sln"; }
+          done
+
+      # SharpCoderSolutionTests skip visibly here - they need the sibling SharpCoder
+      # checkout and run locally.
       - name: Test
         run: dotnet test --no-build --configuration Release
