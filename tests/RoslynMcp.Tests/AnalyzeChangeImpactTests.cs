@@ -78,14 +78,45 @@ public class AnalyzeChangeImpactTests : IAsyncLifetime
         var dir = Path.GetDirectoryName(solutionPath)!;
         if (projects.All(p => File.Exists(Path.Combine(dir, p, "obj", "project.assets.json")))) return;
 
-        var psi = new ProcessStartInfo("dotnet", $"restore \"{solutionPath}\"")
+        // One retry: a nuget.org blip shouldn't fail the suite. On failure, the restore's own
+        // output goes into the message, so CI shows why rather than just "exit code 1".
+        var (code, output) = Restore(solutionPath);
+        if (code != 0) (code, output) = Restore(solutionPath);
+        code.Should().Be(0, "fixture restore must succeed for the tests to run. dotnet restore said:\n{0}", output);
+    }
+
+    private static (int ExitCode, string Output) Restore(string solutionPath)
+    {
+        // -nodeReuse:false: otherwise restore leaves MSBuild worker nodes running that hold the
+        // redirected output pipe open, and reading the output would never reach end-of-file.
+        var psi = new ProcessStartInfo("dotnet", $"restore \"{solutionPath}\" -nodeReuse:false")
         {
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            UseShellExecute = false
         };
+        // MSBuildLocator.RegisterDefaults() put these into this process's environment. A child
+        // `dotnet` that inherits them can pair one SDK's CLI with another SDK's MSBuild when
+        // several SDKs are installed (as on GitHub runners), so start the child without them.
+        foreach (var v in new[] { "MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildSDKsPath" })
+        {
+            psi.Environment.Remove(v);
+        }
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         using var process = Process.Start(psi)!;
-        process.WaitForExit(120_000);
-        process.ExitCode.Should().Be(0, "fixture restore must succeed for the tests to run");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(180_000))
+        {
+            process.Kill(entireProcessTree: true);
+            return (-1, "timed out after 180 s");
+        }
+        // Never block on the output without a bound, even if some grandchild still holds the pipe.
+        Task.WaitAll(new Task[] { stdout, stderr }, TimeSpan.FromSeconds(15));
+        var text = ((stdout.IsCompletedSuccessfully ? stdout.Result : "") +
+                    (stderr.IsCompletedSuccessfully ? stderr.Result : "")).Trim();
+        var lines = text.Split('\n');
+        return (process.ExitCode, string.Join('\n', lines.Skip(Math.Max(0, lines.Length - 40))));
     }
 
     private static JsonElement Parse(string json)
