@@ -160,7 +160,70 @@ public static class RefactorTools
             return match ?? candidates[0];
         }
 
+        // Not an exact metadata name. Models often drop or get the namespace wrong
+        // ("OrderService.CalcTotal", "Bookshop.PriceFormatter.Format"): match the trailing
+        // Type or Type.Member by simple name and accept it only if that is unambiguous.
+        var loose = await ResolveByTrailingNameAsync(solution, namePortion, paramSignature);
+        if (loose.Count == 1) return loose[0];
+        if (loose.Count > 1)
+        {
+            throw new InvalidOperationException(
+                $"'{fullyQualifiedName}' is ambiguous; pass one of these fully-qualified names: " +
+                string.Join(", ", loose.Take(10).Select(c => c.ToDisplayString())) + ".");
+        }
+
         throw new InvalidOperationException(
-            $"Symbol not found: '{fullyQualifiedName}'. Expected 'Namespace.Type', 'Namespace.Type.Member', or 'Namespace.Type.Member(Param.Types)'.");
+            $"Symbol not found: '{fullyQualifiedName}'. Expected 'Namespace.Type', 'Namespace.Type.Member', or 'Namespace.Type.Member(Param.Types)'. " +
+            "symbol_search finds the exact name.");
+    }
+
+    /// <summary>
+    /// Source symbols whose simple type name (and member name, if given) match the last one or two
+    /// segments of <paramref name="namePortion"/>, ignoring the namespace. With a parameter list,
+    /// overloads are filtered by it; without one, a method group counts as one candidate (first overload).
+    /// </summary>
+    private static async Task<List<ISymbol>> ResolveByTrailingNameAsync(
+        Solution solution, string namePortion, string? paramSignature)
+    {
+        var parts = namePortion.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0) return [];
+
+        var typeMatches = new List<ISymbol>();
+        var memberMatches = new List<ISymbol>();
+        var wantedParams = paramSignature?
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var project in solution.Projects)
+        {
+            var compilation = await project.GetCompilationAsync();
+            if (compilation is null) continue;
+
+            // Type.Member: the second-to-last segment is the type.
+            if (parts.Length >= 2)
+            {
+                foreach (var type in compilation.GetSymbolsWithName(parts[^2], SymbolFilter.Type).OfType<INamedTypeSymbol>())
+                {
+                    var members = type.GetMembers(parts[^1]).ToList();
+                    if (wantedParams is not null)
+                    {
+                        members = members.Where(m => m is IMethodSymbol method &&
+                            method.Parameters.Select(p => p.Type.ToDisplayString()).SequenceEqual(wantedParams)).ToList();
+                    }
+                    if (members.Count > 0) memberMatches.Add(members[0]);
+                }
+            }
+
+            // Bare Type (only without a parameter list).
+            if (paramSignature is null)
+            {
+                typeMatches.AddRange(compilation.GetSymbolsWithName(parts[^1], SymbolFilter.Type));
+            }
+        }
+
+        static List<ISymbol> Distinct(List<ISymbol> s) =>
+            s.GroupBy(x => x.ToDisplayString()).Select(g => g.First()).ToList();
+
+        var m = Distinct(memberMatches);
+        return m.Count > 0 ? m : Distinct(typeMatches);
     }
 }

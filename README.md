@@ -45,6 +45,23 @@ Positions are 1-based line/column. Out-of-range columns clamp to the line's end,
 agents give sloppy coordinates. All errors return as structured JSON (`{"error": ...}`),
 never protocol faults.
 
+Two more allowances for less precise clients, smaller local models especially:
+
+- **Auto-load.** If a tool is called before `load_solution`, the server loads the solution
+  itself when exactly one candidate exists: the .sln/.slnx in the nearest directory above the
+  call's `filePath`, or else in the server's working directory (or its only .csproj). The
+  result carries a `note` saying so. If several candidates exist, the error lists them.
+- **Argument coercion.** Values of the wrong JSON type are converted to the type the tool's
+  schema declares when that's unambiguous: `"false"` → `false`, `"12"` → `12`, an array sent
+  as a JSON string → the array. Anything that still doesn't fit gets an error naming the
+  parameter, the expected type and the value received, instead of the SDK's bare
+  "An error occurred invoking '...'".
+- **Loose names.** A `fullyQualifiedName` that isn't an exact metadata name, with the namespace
+  missing or wrong (`OrderService.CalcTotal`), resolves by its trailing `Type.Member` or `Type`
+  when exactly one source symbol matches. If several match, the error lists them.
+- **Solution path as filePath.** Passing the .sln/.slnx/.csproj (or a directory) as `filePath`
+  returns an error saying to pass the .cs file with a position, or a `fullyQualifiedName`.
+
 The original nine tools are read-only: nothing they do modifies your code.
 `apply_rename` and `extract_interface` write to disk; `find_unused_members` is
 read-only. All three are covered in the "v2: tools that edit" section below.
