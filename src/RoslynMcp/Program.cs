@@ -22,6 +22,8 @@ builder.Services
         options.ServerInfo = new Implementation { Name = "RoslynMcp", Version = "2.2.0" };
     })
     .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithToolsFromAssembly()
+    // Argument coercion + auto-load in front of every tool: see ToolCallFilter.
+    .WithRequestFilters(filters => filters.AddCallToolFilter(RoslynMcp.ToolCallFilter.Create));
 
 await builder.Build().RunAsync();

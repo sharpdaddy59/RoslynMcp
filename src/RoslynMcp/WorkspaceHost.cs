@@ -146,6 +146,17 @@ public static class WorkspaceHost
     public static Document GetDocument(string filePath)
     {
         var fullPath = Path.GetFullPath(filePath);
+        if (fullPath.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase) ||
+            fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+            Directory.Exists(fullPath))
+        {
+            // Small models pass the solution path here, with line 0 / column 0, and repeat the call.
+            throw new InvalidOperationException(
+                $"filePath must be a C# source file (.cs) in the solution, not {Path.GetFileName(fullPath.TrimEnd(Path.DirectorySeparatorChar))}. " +
+                "Pass the .cs file that declares the symbol with its 1-based line and column (symbol_search or " +
+                "document_outline give them), or pass fullyQualifiedName instead of a position.");
+        }
         var documentId = Current.GetDocumentIdsWithFilePath(fullPath).FirstOrDefault()
             ?? throw new InvalidOperationException(
                 $"File is not part of the loaded solution: {fullPath}");
